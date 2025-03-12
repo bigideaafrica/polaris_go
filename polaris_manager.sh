@@ -327,8 +327,43 @@ check_prerequisites() {
                     print_warning "Homebrew is not installed but needed to install packages on macOS"
                     print_status "Installing Homebrew..."
                     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+                    
+                    # Add Homebrew to PATH based on Mac architecture
+                    if [ -d "/opt/homebrew" ]; then
+                        # Apple Silicon (M1/M2)
+                        print_status "Setting up Homebrew environment..."
+                        eval "$(/opt/homebrew/bin/brew shellenv)"
+                        # Add to profile for future sessions
+                        if ! grep -q "brew shellenv" ~/.zprofile; then
+                            echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+                        fi
+                    elif [ -d "/usr/local/Homebrew" ]; then
+                        # Intel Mac
+                        print_status "Setting up Homebrew environment..."
+                        eval "$(/usr/local/bin/brew shellenv)"
+                        # Add to profile for future sessions
+                        if ! grep -q "brew shellenv" ~/.zprofile; then
+                            echo 'eval "$(/usr/local/bin/brew shellenv)"' >> ~/.zprofile
+                        fi
+                    fi
+                    
+                    if ! command_exists brew; then
+                        print_error "Failed to set up Homebrew. Please install prerequisites manually."
+                        print_error "For wget: brew install wget"
+                        print_error "For git: brew install git"
+                        exit 1
+                    fi
                 fi
-                brew install $missing_packages
+                
+                # Install each missing package individually
+                for pkg in ${missing_packages}; do
+                    # Clean up leading/trailing spaces
+                    pkg=$(echo "$pkg" | xargs)
+                    if [ -n "$pkg" ]; then
+                        print_status "Installing $pkg with Homebrew..."
+                        brew install "$pkg"
+                    fi
+                done
             else
                 sudo apt-get update
                 sudo apt-get install -y $missing_packages
@@ -628,8 +663,12 @@ install_docker() {
             # Check if Docker.app is running on macOS
             if ! pgrep -q "Docker"; then
                 print_warning "Docker Desktop is not running on macOS"
-                print_status "Please start Docker Desktop manually"
+                print_status "Starting Docker Desktop..."
                 open -a Docker
+                print_warning "Please wait for Docker Desktop to fully start"
+                print_warning "This may take a minute or two..."
+                # Give user time to let Docker start
+                sleep 10
             fi
         elif pidof systemd >/dev/null && ! systemctl is-active --quiet docker; then
             print_status "Starting Docker service..."
@@ -656,14 +695,33 @@ install_docker() {
                 print_status "Installing Homebrew first..."
                 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
                 
-                # Add Homebrew to PATH if it wasn't automatically added
-                if ! command_exists brew; then
-                    echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+                # Add Homebrew to PATH based on Mac architecture
+                if [ -d "/opt/homebrew" ]; then
+                    # Apple Silicon (M1/M2)
+                    print_status "Setting up Homebrew environment..."
                     eval "$(/opt/homebrew/bin/brew shellenv)"
+                    # Add to profile for future sessions
+                    if ! grep -q "brew shellenv" ~/.zprofile; then
+                        echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+                    fi
+                elif [ -d "/usr/local/Homebrew" ]; then
+                    # Intel Mac
+                    print_status "Setting up Homebrew environment..."
+                    eval "$(/usr/local/bin/brew shellenv)"
+                    # Add to profile for future sessions
+                    if ! grep -q "brew shellenv" ~/.zprofile; then
+                        echo 'eval "$(/usr/local/bin/brew shellenv)"' >> ~/.zprofile
+                    fi
+                fi
+                
+                if ! command_exists brew; then
+                    print_error "Failed to set up Homebrew. Cannot install Docker."
+                    exit 1
                 fi
             fi
             
             # Install Docker Desktop using Homebrew
+            print_status "Installing Docker Desktop via Homebrew..."
             brew install --cask docker
             
             # Launch Docker Desktop
@@ -675,8 +733,15 @@ install_docker() {
             echo -e "${YELLOW}  2. Accept the license agreement${NC}"
             echo -e "${YELLOW}  3. Provide your system password to allow Docker to install its components${NC}"
             echo
-            print_warning "Please wait until Docker is fully started before continuing."
+            print_warning "Please wait until Docker is fully started before continuing (may take a minute or two)."
             read -p "Press Enter once Docker is running..." 
+            
+            # Verify Docker is working
+            if ! docker info &>/dev/null; then
+                print_warning "Docker doesn't seem to be running correctly. Make sure Docker Desktop is running."
+                print_warning "You might need to manually start Docker Desktop from your Applications folder."
+                sleep 3
+            fi
             
         else
             # Remove old versions if they exist
@@ -785,18 +850,72 @@ install_python_requirements() {
             print_status "Installing Homebrew first..."
             /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
             
-            # Add Homebrew to PATH if it wasn't automatically added
-            if ! command_exists brew; then
-                echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+            # Add Homebrew to PATH based on Mac architecture
+            if [ -d "/opt/homebrew" ]; then
+                # Apple Silicon (M1/M2)
+                print_status "Setting up Homebrew environment..."
                 eval "$(/opt/homebrew/bin/brew shellenv)"
+                # Add to profile for future sessions
+                if ! grep -q "brew shellenv" ~/.zprofile; then
+                    echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+                fi
+            elif [ -d "/usr/local/Homebrew" ]; then
+                # Intel Mac
+                print_status "Setting up Homebrew environment..."
+                eval "$(/usr/local/bin/brew shellenv)"
+                # Add to profile for future sessions
+                if ! grep -q "brew shellenv" ~/.zprofile; then
+                    echo 'eval "$(/usr/local/bin/brew shellenv)"' >> ~/.zprofile
+                fi
             fi
         fi
+
+        # Check if Python 3.10 is already installed
+        if brew list python@3.10 &>/dev/null; then
+            print_success "Python 3.10 is already installed via Homebrew"
+        else
+            # Install Python 3.10
+            print_status "Installing Python 3.10 via Homebrew..."
+            brew install python@3.10
+            
+            # Make Python 3.10 the default
+            print_status "Setting Python 3.10 as the default Python version..."
+            brew link --force python@3.10
+        fi
+
+        # Verify Python installation and version
+        if command_exists python3; then
+            print_success "Python $(python3 --version) installed"
+        else
+            print_error "Python installation failed. Please install manually:"
+            print_error "brew install python@3.10"
+            exit 1
+        fi
         
-        # Install Python and required tools on macOS
-        brew install python@3.10 rust
+        # Install Rust
+        if ! command_exists rustc; then
+            print_status "Installing Rust..."
+            brew install rust
+        else
+            print_success "Rust is already installed"
+        fi
+        
+        # Install XCode Command Line Tools if needed
+        if ! command_exists xcode-select || ! xcode-select -p &>/dev/null; then
+            print_status "Installing XCode Command Line Tools..."
+            xcode-select --install
+            print_warning "If prompted, please complete the XCode Command Line Tools installation"
+            print_warning "Press Enter once the installation is complete..."
+            read -p ""
+        fi
+        
+        # Install additional build dependencies
+        print_status "Installing additional build dependencies..."
+        brew install gcc cmake openssl
         
         # Install pip if not already available
         if ! command_exists pip3; then
+            print_status "Installing pip..."
             curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
             python3 get-pip.py
             rm get-pip.py
