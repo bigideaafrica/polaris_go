@@ -47,6 +47,69 @@ print_warning() {
     echo -e "${YELLOW}[!]${NC} $1"
 }
 
+# Function to detect public IP and ask for confirmation
+get_public_ip() {
+    print_status "Detecting your public IP address..."
+    
+    # Try multiple services in case one fails
+    if curl -s https://api.ipify.org &>/dev/null; then
+        detected_ip=$(curl -s https://api.ipify.org)
+    elif curl -s https://ifconfig.me &>/dev/null; then
+        detected_ip=$(curl -s https://ifconfig.me)
+    elif curl -s https://icanhazip.com &>/dev/null; then
+        detected_ip=$(curl -s https://icanhazip.com)
+    else
+        print_error "Could not automatically detect your public IP address."
+        detected_ip=""
+    fi
+    
+    # If we found an IP, ask for confirmation
+    if [ ! -z "$detected_ip" ]; then
+        # Make the detected IP highly visible
+        echo
+        echo -e "${YELLOW}================================${NC}"
+        echo -e "${YELLOW}Detected public IP address: ${BOLD}$detected_ip${NC}"
+        echo -e "${YELLOW}================================${NC}"
+        echo
+        read -p "Is this correct? (y/n): " confirm_ip
+        
+        if [[ $confirm_ip =~ ^[Yy]$ ]]; then
+            public_ip=$detected_ip
+            print_success "Using detected IP: $public_ip"
+        else
+            # If user says it's incorrect, ask for manual entry
+            echo
+            print_status "Please enter your correct IP address:"
+            while true; do
+                read -p "Enter your correct public IP address: " public_ip
+                if [[ $public_ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                    print_success "Using manual IP: $public_ip"
+                    break
+                else
+                    print_error "Invalid IP address format. Please try again."
+                fi
+            done
+        fi
+    else
+        # If detection failed, fall back to manual entry
+        echo
+        print_warning "Automatic IP detection failed. Please enter your IP manually:"
+        while true; do
+            read -p "Enter your public IP address: " public_ip
+            if [[ $public_ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                print_success "Using manual IP: $public_ip"
+                break
+            else
+                print_error "Invalid IP address format. Please try again."
+            fi
+        done
+    fi
+    
+    # Store result in a global variable instead of returning it
+    # This allows the caller to get the value without capturing the output
+    DETECTED_PUBLIC_IP="$public_ip"
+}
+
 # Function to install WSL automatically
 install_wsl_automatically() {
     clear
@@ -421,10 +484,8 @@ show_menu() {
     echo -e "${YELLOW}Available Options:${NC}"
     echo -e "${GREEN}─────────────────────────────────────────────────────${NC}"
     echo -e "1) ${CYAN}Install Polaris${NC}"
-    if [ "$is_installed" = true ]; then
-        echo -e "2) ${YELLOW}Reinstall Polaris${NC}"
-        echo -e "3) ${GREEN}Enter Polaris Environment${NC}"
-    fi
+    echo -e "2) ${YELLOW}Reinstall Polaris${NC}"
+    echo -e "3) ${GREEN}Enter Polaris Environment${NC}"
     echo -e "4) ${RED}Uninstall Polaris${NC}"
     echo -e "5) ${BLUE}Check Installation Status${NC}"
     echo -e "6) ${MAGENTA}Show WSL Setup Instructions${NC}"
@@ -448,7 +509,12 @@ show_menu() {
             fi
             ;;
         2)
-            if [ "$is_installed" = true ]; then
+            if [ "$is_installed" = false ]; then
+                print_warning "Polaris is not installed yet!"
+                echo -e "Please choose ${CYAN}Install Polaris${NC} first."
+                sleep 2
+                return 0
+            else
                 print_warning "This will reinstall Polaris. Your current installation will be removed."
                 read -p "Do you want to continue? (y/n): " confirm
                 if [[ $confirm =~ ^[Yy]$ ]]; then
@@ -460,30 +526,31 @@ show_menu() {
                     uninstall_polaris
                     install_polaris
                 fi
-            else
-                print_error "Polaris is not installed. Choose Install option instead."
-                sleep 2
             fi
             ;;
         3)
-            if [ "$is_installed" = true ]; then
-                enter_polaris_environment
+            if [ "$is_installed" = false ]; then
+                print_warning "Polaris is not installed yet!"
+                echo -e "Please choose ${CYAN}Install Polaris${NC} first."
+                sleep 2
+                return 0
             else
-                print_error "Invalid option"
-                sleep 1
+                enter_polaris_environment
             fi
             ;;
         4)
-            if [ "$is_installed" = true ]; then
+            if [ "$is_installed" = false ]; then
+                print_warning "Polaris is not installed yet!"
+                echo -e "Nothing to uninstall."
+                sleep 2
+                return 0
+            else
                 # Ask for backup before uninstall
                 read -p "Do you want to backup your configuration before uninstalling? (y/n): " backup_confirm
                 if [[ $backup_confirm =~ ^[Yy]$ ]]; then
                     backup_polaris_config
                 fi
                 uninstall_polaris
-            else
-                print_error "Polaris is not installed."
-                sleep 2
             fi
             ;;
         5)
@@ -784,14 +851,9 @@ install_polaris() {
     echo
     
     # Get public IP
-    while true; do
-        read -p "Enter your public IP address: " public_ip
-        if [[ $public_ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            break
-        else
-            print_error "Invalid IP address format. Please try again."
-        fi
-    done
+    get_public_ip
+    # Use the global variable
+    public_ip="$DETECTED_PUBLIC_IP"
 
     # Get SSH username
     read -p "Enter SSH username: " ssh_user
@@ -1393,14 +1455,9 @@ troubleshoot_polaris_startup() {
                 # Create a new .env file
                 print_status "Creating new .env file..."
                 # Get public IP
-                while true; do
-                    read -p "Enter your public IP address: " public_ip
-                    if [[ $public_ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                        break
-                    else
-                        print_error "Invalid IP address format. Please try again."
-                    fi
-                done
+                get_public_ip
+                # Use the global variable
+                public_ip="$DETECTED_PUBLIC_IP"
 
                 # Get SSH username
                 read -p "Enter SSH username: " ssh_user
