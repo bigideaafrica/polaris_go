@@ -262,7 +262,7 @@ check_system_compatibility() {
     # Check if macOS
     if [ "$os_name" = "Darwin" ]; then
         print_success "Running in macOS environment - ${GREEN}Compatible ✓${NC}"
-        echo -e "${YELLOW}Note: Some features might require additional configuration on macOS.${NC}"
+        echo -e "${YELLOW}Note: macOS uses launchd instead of systemd. Some features will use macOS alternatives.${NC}"
     # Check Linux distribution if needed
     elif [ "$is_wsl" = true ]; then
         print_success "Running in WSL environment - ${GREEN}Compatible ✓${NC}"
@@ -270,13 +270,18 @@ check_system_compatibility() {
         echo -e "${YELLOW}Select option 5 from the menu for more information.${NC}"
     else
         # Check for systemd support
-        if pidof systemd >/dev/null; then
+        if command_exists pidof && pidof systemd >/dev/null; then
             print_success "Running in Linux environment with systemd - ${GREEN}Compatible ✓${NC}"
         else
             print_warning "Running in Linux environment without systemd"
             echo -e "${YELLOW}Some features may require manual configuration${NC}"
         fi
     fi
+}
+
+# Function to check if we're running on macOS
+is_macos() {
+    [ "$(uname -s)" = "Darwin" ]
 }
 
 # Function to check prerequisites
@@ -316,8 +321,18 @@ check_prerequisites() {
         read -p "Would you like to install them now? (y/n): " install_prereqs
         if [[ $install_prereqs =~ ^[Yy]$ ]]; then
             print_status "Installing prerequisites..."
-            sudo apt-get update
-            sudo apt-get install -y $missing_packages
+            if is_macos; then
+                # Check if Homebrew is installed
+                if ! command_exists brew; then
+                    print_warning "Homebrew is not installed but needed to install packages on macOS"
+                    print_status "Installing Homebrew..."
+                    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+                fi
+                brew install $missing_packages
+            else
+                sudo apt-get update
+                sudo apt-get install -y $missing_packages
+            fi
             echo
             print_success "Prerequisites installed successfully!"
         else
@@ -609,7 +624,14 @@ install_docker() {
     if command_exists docker; then
         print_success "Docker is already installed"
         # Start Docker if not running
-        if pidof systemd >/dev/null && ! systemctl is-active --quiet docker; then
+        if is_macos; then
+            # Check if Docker.app is running on macOS
+            if ! pgrep -q "Docker"; then
+                print_warning "Docker Desktop is not running on macOS"
+                print_status "Please start Docker Desktop manually"
+                open -a Docker
+            fi
+        elif pidof systemd >/dev/null && ! systemctl is-active --quiet docker; then
             print_status "Starting Docker service..."
             sudo systemctl start docker
         fi
@@ -626,40 +648,73 @@ install_docker() {
             sleep 3
         fi
         
-        # Remove old versions if they exist
-        for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do
-            sudo apt-get remove -y $pkg >/dev/null 2>&1
-        done
-
-        # Install Docker prerequisites
-        sudo apt-get update
-        sudo apt-get install -y ca-certificates curl gnupg
-
-        # Add Docker's official GPG key
-        sudo install -m 0755 -d /etc/apt/keyrings
-        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-        sudo chmod a+r /etc/apt/keyrings/docker.gpg
-
-        # Add the repository to Apt sources
-        echo \
-            "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-            "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" | \
-            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-        # Install Docker Engine
-        sudo apt-get update
-        sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-        # Start Docker service
-        if pidof systemd >/dev/null; then
-            sudo systemctl start docker
+        if is_macos; then
+            print_status "Installing Docker Desktop for Mac..."
+            
+            # Check if Homebrew is installed
+            if ! command_exists brew; then
+                print_status "Installing Homebrew first..."
+                /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+                
+                # Add Homebrew to PATH if it wasn't automatically added
+                if ! command_exists brew; then
+                    echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+                    eval "$(/opt/homebrew/bin/brew shellenv)"
+                fi
+            fi
+            
+            # Install Docker Desktop using Homebrew
+            brew install --cask docker
+            
+            # Launch Docker Desktop
+            print_status "Launching Docker Desktop. Please complete the setup if prompted..."
+            open -a Docker
+            
+            print_warning "Docker Desktop is launching. You might need to:"
+            echo -e "${YELLOW}  1. Complete the initial Docker setup if this is the first installation${NC}"
+            echo -e "${YELLOW}  2. Accept the license agreement${NC}"
+            echo -e "${YELLOW}  3. Provide your system password to allow Docker to install its components${NC}"
+            echo
+            print_warning "Please wait until Docker is fully started before continuing."
+            read -p "Press Enter once Docker is running..." 
+            
         else
-            print_warning "Could not start Docker service automatically."
-            print_warning "You may need to start it manually using appropriate commands for your system."
+            # Remove old versions if they exist
+            for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do
+                sudo apt-get remove -y $pkg >/dev/null 2>&1
+            done
+
+            # Install Docker prerequisites
+            sudo apt-get update
+            sudo apt-get install -y ca-certificates curl gnupg
+
+            # Add Docker's official GPG key
+            sudo install -m 0755 -d /etc/apt/keyrings
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+            sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
+            # Add the repository to Apt sources
+            echo \
+                "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+                "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" | \
+                sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+            # Install Docker Engine
+            sudo apt-get update
+            sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+            # Start Docker service
+            if pidof systemd >/dev/null; then
+                sudo systemctl start docker
+            else
+                print_warning "Could not start Docker service automatically."
+                print_warning "You may need to start it manually using appropriate commands for your system."
+            fi
+
+            # Add current user to docker group
+            sudo usermod -aG docker $USER
         fi
 
-        # Add current user to docker group
-        sudo usermod -aG docker $USER
         print_success "Docker installed successfully"
         
         # Special instructions for WSL
@@ -675,32 +730,47 @@ install_docker() {
 
 # Function to check and install SSH server
 install_ssh() {
-    if ! command_exists sshd; then
-        print_status "Installing SSH server..."
-        sudo apt-get update
-        sudo apt-get install -y openssh-server
+    if is_macos; then
+        print_status "Checking SSH server on macOS..."
         
-        if pidof systemd >/dev/null; then
-            sudo systemctl enable ssh
-            sudo systemctl start ssh
+        # Check if SSH service is enabled in macOS
+        if sudo systemsetup -getremotelogin | grep -q "On"; then
+            print_success "SSH server is already enabled on macOS"
         else
-            print_warning "Could not start SSH service automatically."
-            print_warning "You may need to start it manually using appropriate commands for your system."
-            echo -e "${YELLOW}Try: sudo service ssh start${NC}"
+            print_status "Enabling SSH server on macOS..."
+            print_warning "You may be prompted for your password to enable the SSH service"
+            sudo systemsetup -setremotelogin on
+            print_success "SSH server enabled on macOS"
         fi
-        
-        print_success "SSH server installed"
     else
-        print_success "SSH server is already installed"
-        # Ensure SSH is running if systemd is available
-        if pidof systemd >/dev/null && ! systemctl is-active --quiet ssh; then
-            print_status "Starting SSH service..."
-            sudo systemctl start ssh
-        elif [ ! -z "$(ps -e | grep sshd)" ]; then
-            print_success "SSH service is running"
+        # Linux SSH server installation
+        if ! command_exists sshd; then
+            print_status "Installing SSH server..."
+            sudo apt-get update
+            sudo apt-get install -y openssh-server
+            
+            if command_exists systemctl; then
+                sudo systemctl enable ssh
+                sudo systemctl start ssh
+            else
+                print_warning "Could not start SSH service automatically."
+                print_warning "You may need to start it manually using appropriate commands for your system."
+                echo -e "${YELLOW}Try: sudo service ssh start${NC}"
+            fi
+            
+            print_success "SSH server installed"
         else
-            print_warning "SSH service is not running."
-            echo -e "${YELLOW}Try: sudo service ssh start${NC}"
+            print_success "SSH server is already installed"
+            # Ensure SSH is running if systemd is available
+            if command_exists systemctl && ! systemctl is-active --quiet ssh; then
+                print_status "Starting SSH service..."
+                sudo systemctl start ssh
+            elif [ ! -z "$(ps -e | grep sshd)" ]; then
+                print_success "SSH service is running"
+            else
+                print_warning "SSH service is not running."
+                echo -e "${YELLOW}Try: sudo service ssh start${NC}"
+            fi
         fi
     fi
 }
@@ -708,8 +778,35 @@ install_ssh() {
 # Function to install Python requirements
 install_python_requirements() {
     print_status "Installing Python requirements..."
-    sudo apt-get update
-    sudo apt-get install -y python3-venv python3-pip g++ rustc cargo build-essential python3-dev
+    
+    if is_macos; then
+        # For macOS, use Homebrew
+        if ! command_exists brew; then
+            print_status "Installing Homebrew first..."
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            
+            # Add Homebrew to PATH if it wasn't automatically added
+            if ! command_exists brew; then
+                echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+                eval "$(/opt/homebrew/bin/brew shellenv)"
+            fi
+        fi
+        
+        # Install Python and required tools on macOS
+        brew install python@3.10 rust
+        
+        # Install pip if not already available
+        if ! command_exists pip3; then
+            curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+            python3 get-pip.py
+            rm get-pip.py
+        fi
+    else
+        # For Linux, use apt
+        sudo apt-get update
+        sudo apt-get install -y python3-venv python3-pip g++ rustc cargo build-essential python3-dev
+    fi
+    
     print_success "Python requirements installed"
 }
 
