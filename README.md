@@ -15,8 +15,8 @@ Polaris is a modern development workspace manager for distributed compute resour
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/bigideaafrica/Polaris_setup
-cd Polaris_setup
+git clone https://github.com/bigideaafrica/Polaris_go
+cd Polaris_go
 ```
 
 2. Make the script executable:
