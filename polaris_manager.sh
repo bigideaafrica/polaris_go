@@ -1012,8 +1012,23 @@ install_polaris() {
     print_status "Checking and installing prerequisites..."
     
     # Install required packages
-    sudo apt-get update
-    sudo apt-get install -y curl wget git
+    if is_macos; then
+        # For macOS, use Homebrew
+        if ! command_exists brew; then
+            print_status "Setting up Homebrew first..."
+            # Configure Homebrew PATH if needed
+            if [ -d "/opt/homebrew" ]; then
+                eval "$(/opt/homebrew/bin/brew shellenv)"
+            elif [ -d "/usr/local/Homebrew" ]; then
+                eval "$(/usr/local/bin/brew shellenv)"
+            fi
+        fi
+        brew install curl wget git
+    else
+        # For Linux, use apt-get
+        sudo apt-get update
+        sudo apt-get install -y curl wget git
+    fi
 
     # Check Python version compatibility
     print_status "Checking Python version compatibility..."
@@ -1027,10 +1042,28 @@ install_polaris() {
             read -p "Would you like to install a compatible Python version? (y/n): " install_python
             if [[ $install_python =~ ^[Yy]$ ]]; then
                 print_status "Installing Python 3.10..."
-                sudo apt-get install -y software-properties-common
-                sudo add-apt-repository -y ppa:deadsnakes/ppa
-                sudo apt-get update
-                sudo apt-get install -y python3.10 python3.10-venv python3.10-dev python3-pip
+                
+                if is_macos; then
+                    # For macOS, use Homebrew
+                    if ! command_exists brew; then
+                        print_status "Setting up Homebrew first..."
+                        # Configure Homebrew PATH if needed
+                        if [ -d "/opt/homebrew" ]; then
+                            eval "$(/opt/homebrew/bin/brew shellenv)"
+                        elif [ -d "/usr/local/Homebrew" ]; then
+                            eval "$(/usr/local/bin/brew shellenv)"
+                        fi
+                    fi
+                    brew install python@3.10
+                    brew link --force python@3.10
+                else
+                    # For Linux, use apt with deadsnakes PPA
+                    sudo apt-get install -y software-properties-common
+                    sudo add-apt-repository -y ppa:deadsnakes/ppa
+                    sudo apt-get update
+                    sudo apt-get install -y python3.10 python3.10-venv python3.10-dev python3-pip
+                fi
+                
                 print_success "Python 3.10 installed successfully!"
                 print_warning "Some commands in this script will continue to use the system Python."
                 print_warning "However, Polaris will be installed using Python 3.10."
@@ -1046,10 +1079,28 @@ install_polaris() {
         read -p "Would you like to install Python 3.10? (y/n): " install_python
         if [[ $install_python =~ ^[Yy]$ ]]; then
             print_status "Installing Python 3.10..."
-            sudo apt-get install -y software-properties-common
-            sudo add-apt-repository -y ppa:deadsnakes/ppa
-            sudo apt-get update
-            sudo apt-get install -y python3.10 python3.10-venv python3.10-dev python3-pip
+            
+            if is_macos; then
+                # For macOS, use Homebrew
+                if ! command_exists brew; then
+                    print_status "Setting up Homebrew first..."
+                    # Configure Homebrew PATH if needed
+                    if [ -d "/opt/homebrew" ]; then
+                        eval "$(/opt/homebrew/bin/brew shellenv)"
+                    elif [ -d "/usr/local/Homebrew" ]; then
+                        eval "$(/usr/local/bin/brew shellenv)"
+                    fi
+                fi
+                brew install python@3.10
+                brew link --force python@3.10
+            else
+                # For Linux, use apt with deadsnakes PPA
+                sudo apt-get install -y software-properties-common
+                sudo add-apt-repository -y ppa:deadsnakes/ppa
+                sudo apt-get update
+                sudo apt-get install -y python3.10 python3.10-venv python3.10-dev python3-pip
+            fi
+            
             print_success "Python 3.10 installed successfully!"
         else
             print_error "Cannot continue without Python 3."
@@ -1065,8 +1116,27 @@ install_polaris() {
 
     # Install system dependencies first
     print_status "Installing system dependencies..."
-    sudo apt-get install -y g++ rustc cargo build-essential python3-dev
-    check_command "Failed to install system dependencies" 0
+    if is_macos; then
+        # For macOS, install with Homebrew
+        if ! command_exists brew; then
+            print_status "Setting up Homebrew first..."
+            # Configure Homebrew PATH if needed
+            if [ -d "/opt/homebrew" ]; then
+                eval "$(/opt/homebrew/bin/brew shellenv)"
+            elif [ -d "/usr/local/Homebrew" ]; then
+                eval "$(/usr/local/bin/brew shellenv)"
+            fi
+        fi
+        
+        # Install required development tools for macOS
+        print_status "Installing development tools with Homebrew..."
+        brew install gcc rust cmake python3 openssl
+        check_command "Failed to install system dependencies" 0
+    else
+        # For Linux, use apt-get
+        sudo apt-get install -y g++ rustc cargo build-essential python3-dev
+        check_command "Failed to install system dependencies" 0
+    fi
 
     # Get user inputs
     print_status "Please provide the following information:"
