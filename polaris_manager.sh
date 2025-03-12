@@ -229,18 +229,20 @@ check_system_compatibility() {
         is_wsl=true
     fi
 
-    if [ "$os_name" != "Linux" ] && [ "$is_wsl" = false ]; then
+    # Allow both Linux and macOS (Darwin)
+    if [ "$os_name" != "Linux" ] && [ "$os_name" != "Darwin" ] && [ "$is_wsl" = false ]; then
         clear
         echo -e "${BG_RED}${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
         echo -e "${BG_RED}${BOLD}║                 SYSTEM COMPATIBILITY ERROR                   ║${NC}"
         echo -e "${BG_RED}${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
         echo
-        echo -e "${RED}${BOLD}⚠️  This script requires a Linux-based environment! ⚠️${NC}"
+        echo -e "${RED}${BOLD}⚠️  This script requires a Unix-based environment! ⚠️${NC}"
         echo -e "${YELLOW}Current system detected: ${BOLD}$os_name${NC}"
         echo
-        echo -e "${BLUE}${BOLD}You have two options:${NC}"
+        echo -e "${BLUE}${BOLD}You have three options:${NC}"
         echo -e "${GREEN}${BOLD}1.${NC} ${BLUE}Run this script in a Linux environment (native Linux installation)${NC}"
-        echo -e "${GREEN}${BOLD}2.${NC} ${BLUE}Use Windows Subsystem for Linux (WSL) if you're on Windows${NC}"
+        echo -e "${GREEN}${BOLD}2.${NC} ${BLUE}Run this script in macOS (native macOS installation)${NC}"
+        echo -e "${GREEN}${BOLD}3.${NC} ${BLUE}Use Windows Subsystem for Linux (WSL) if you're on Windows${NC}"
         echo
         echo -e "${YELLOW}${BOLD}Would you like me to help you install WSL automatically? (y/n)${NC}"
         read -p "${CYAN}> ${NC}" install_wsl_auto
@@ -257,8 +259,12 @@ check_system_compatibility() {
         exit 1
     fi
 
+    # Check if macOS
+    if [ "$os_name" = "Darwin" ]; then
+        print_success "Running in macOS environment - ${GREEN}Compatible ✓${NC}"
+        echo -e "${YELLOW}Note: Some features might require additional configuration on macOS.${NC}"
     # Check Linux distribution if needed
-    if [ "$is_wsl" = true ]; then
+    elif [ "$is_wsl" = true ]; then
         print_success "Running in WSL environment - ${GREEN}Compatible ✓${NC}"
         echo -e "${YELLOW}Note: Docker in WSL may require special configuration.${NC}"
         echo -e "${YELLOW}Select option 5 from the menu for more information.${NC}"
