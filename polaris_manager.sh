@@ -415,31 +415,39 @@ show_welcome_banner() {
 
 # Function to check if Polaris is installed
 check_polaris_installation() {
+    local current_dir=$(pwd)
+    
     # First check if the repository exists
     if [ ! -d "polaris-subnet" ]; then
         return 1 # Not installed
     fi
 
     # Change into the repository directory
-    cd polaris-subnet || return 1
+    cd polaris-subnet || { cd "$current_dir"; return 1; }
 
     # Check if virtual environment exists and activate it
     if [ ! -d "venv" ] || [ ! -f "venv/bin/activate" ]; then
-        cd ..
+        cd "$current_dir"
         return 1 # Virtual environment not found
+    fi
+
+    # Check if .env file exists (additional verification)
+    if [ ! -f ".env" ]; then
+        cd "$current_dir"
+        return 1 # Configuration not found
     fi
 
     # Try to activate virtual environment and check polaris
     source venv/bin/activate
-    if ! command -v polaris &>/dev/null || ! polaris --help &>/dev/null; then
+    if ! command -v polaris &>/dev/null || ! polaris --help &>/dev/null 2>&1; then
         deactivate
-        cd ..
+        cd "$current_dir"
         return 1 # Polaris command not working
     fi
 
     # Everything worked, clean up and return success
     deactivate
-    cd ..
+    cd "$current_dir"
     return 0
 }
 
@@ -535,7 +543,13 @@ enter_polaris_environment() {
 
 # Function to show menu and get user choice
 show_menu() {
-    local is_installed=$(check_polaris_installation && echo true || echo false)
+    # Check if Polaris was just installed
+    if [ "${POLARIS_INSTALLED:-false}" = "true" ]; then
+        local is_installed=true
+        unset POLARIS_INSTALLED
+    else
+        local is_installed=$(check_polaris_installation && echo true || echo false)
+    fi
     
     echo -e "${YELLOW}Available Options:${NC}"
     echo -e "${GREEN}─────────────────────────────────────────────────────${NC}"
@@ -562,6 +576,8 @@ show_menu() {
                 return 0
             else
                 install_polaris
+                # Re-check installation status after installation completes
+                is_installed=$(check_polaris_installation && echo true || echo false)
             fi
             ;;
         2)
@@ -581,10 +597,14 @@ show_menu() {
                     fi
                     uninstall_polaris
                     install_polaris
+                    # Re-check installation status after reinstallation
+                    is_installed=$(check_polaris_installation && echo true || echo false)
                 fi
             fi
             ;;
         3)
+            # Re-check installation status before entering the environment
+            is_installed=$(check_polaris_installation && echo true || echo false)
             if [ "$is_installed" = false ]; then
                 print_warning "Polaris is not installed yet!"
                 echo -e "Please choose ${CYAN}Install Polaris${NC} first."
@@ -595,6 +615,8 @@ show_menu() {
             fi
             ;;
         4)
+            # Re-check installation status before uninstalling
+            is_installed=$(check_polaris_installation && echo true || echo false)
             if [ "$is_installed" = false ]; then
                 print_warning "Polaris is not installed yet!"
                 echo -e "Nothing to uninstall."
@@ -610,12 +632,21 @@ show_menu() {
             fi
             ;;
         5)
+            # Check if we know Polaris was just installed
+            if [ "${POLARIS_INSTALLED:-false}" = "true" ]; then
+                is_installed=true
+            else
+                # Otherwise re-check installation status
+                is_installed=$(check_polaris_installation && echo true || echo false)
+            fi
+            
             if [ "$is_installed" = true ]; then
                 print_success "Polaris is installed and configured."
                 echo -e "${YELLOW}To use Polaris, select option 3 to enter Polaris environment.${NC}"
-                if command -v polaris &> /dev/null; then
+                # Try to show status if possible
+                if [ -d "polaris-subnet" ]; then
                     echo -e "${BLUE}Current Polaris status:${NC}"
-                    polaris status
+                    (cd polaris-subnet && source venv/bin/activate && polaris status && deactivate) || echo -e "${YELLOW}Cannot check status at this time.${NC}"
                 fi
             else
                 print_warning "Polaris is not installed on this system."
@@ -627,6 +658,8 @@ show_menu() {
             show_wsl_instructions
             ;;
         7)
+            # Re-check installation status before backup
+            is_installed=$(check_polaris_installation && echo true || echo false)
             if [ "$is_installed" = true ]; then
                 backup_polaris_config
                 read -p "Press Enter to continue..."
@@ -1262,22 +1295,56 @@ EOF
     fi
 
     print_success "Polaris setup completed successfully!"
-    print_status "Starting Polaris..."
     
-    # Start Polaris
-    polaris start
-
-    echo
-    print_success "Setup complete! Polaris is now running."
+    # Show clean success message and available commands
+    clear
+    echo -e "${GREEN}─────────────────────────────────────────────────────${NC}"
+    echo -e "${CYAN}${BOLD}Success! Polaris Installation Complete${NC}"
+    echo -e "${GREEN}─────────────────────────────────────────────────────${NC}"
+    echo -e "${YELLOW}Available Polaris Commands:${NC}"
+    echo -e "• ${CYAN}polaris start${NC}     - Start Polaris services"
+    echo -e "• ${CYAN}polaris stop${NC}      - Stop Polaris services"
+    echo -e "• ${CYAN}polaris status${NC}    - Check service status"
+    echo -e "• ${CYAN}polaris logs${NC}      - View service logs"
+    echo -e "• ${CYAN}polaris --help${NC}    - Show all available commands"
     echo
     print_warning "Important: Please log out and log back in for Docker group changes to take effect."
     echo
-    print_status "You can use the following commands:"
-    echo "  - polaris status : Check service status"
-    echo "  - polaris logs   : View logs"
-    echo "  - polaris stop   : Stop the service"
     
-    read -p "Press Enter to continue..."
+    # Ask user if they want to start Polaris immediately
+    echo -e "${CYAN}Would you like to start Polaris now? (y/n)${NC}"
+    read -p "${CYAN}> ${NC}" start_polaris_now
+    if [[ $start_polaris_now =~ ^[Yy]$ ]]; then
+        print_status "Starting Polaris services..."
+        cd polaris-subnet
+        source venv/bin/activate
+        polaris start
+        if [ $? -eq 0 ]; then
+            print_success "Polaris services started successfully!"
+            echo
+            print_status "Showing current status:"
+            polaris status
+            echo
+            read -p "Press Enter to enter the Polaris environment..."
+            # Start interactive shell in the environment
+            $SHELL
+            # When shell exits, deactivate the environment
+            deactivate
+        else
+            print_error "Failed to start Polaris services. Please check the logs."
+            deactivate
+        fi
+        cd ..
+    fi
+    
+    echo
+    read -p "Press Enter to continue to main menu..."
+    
+    # Set global installation flag to true - make sure it's exported
+    POLARIS_INSTALLED=true
+    export POLARIS_INSTALLED
+    # Force immediate check to update status
+    check_polaris_installation
 }
 
 # Function to set up SSH key authentication
