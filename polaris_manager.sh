@@ -1217,7 +1217,7 @@ install_polaris() {
     print_status "Setting up Polaris..."
     
     # Clone repository
-    git clone https://github.com/bigideainc/polaris-subnet.git
+    git clone https://github.com/bigideaafrica/polariscloud.git
     if [ $? -ne 0 ]; then
         print_error "Failed to clone the repository. Please check your internet connection and try again."
         return 1

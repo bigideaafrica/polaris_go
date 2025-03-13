@@ -83,7 +83,7 @@ If you encounter problems not covered in this README:
 
 1. Check the logs in the Polaris environment using `polaris logs`
 2. Use the troubleshooting option in the manager script
-3. Visit the [Polaris documentation](https://github.com/bigideainc/polaris-subnet) for detailed information
+3. Visit the [Polaris documentation](https://github.com/bigideaafrica/polariscloud.git) for detailed information
 
 ## License
 
