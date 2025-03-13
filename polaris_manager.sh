@@ -324,34 +324,10 @@ check_prerequisites() {
             if is_macos; then
                 # Check if Homebrew is installed
                 if ! command_exists brew; then
-                    print_warning "Homebrew is not installed but needed to install packages on macOS"
-                    print_status "Installing Homebrew..."
-                    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-                    
-                    # Add Homebrew to PATH based on Mac architecture
-                    if [ -d "/opt/homebrew" ]; then
-                        # Apple Silicon (M1/M2)
-                        print_status "Setting up Homebrew environment..."
-                        eval "$(/opt/homebrew/bin/brew shellenv)"
-                        # Add to profile for future sessions
-                        if ! grep -q "brew shellenv" ~/.zprofile; then
-                            echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
-                        fi
-                    elif [ -d "/usr/local/Homebrew" ]; then
-                        # Intel Mac
-                        print_status "Setting up Homebrew environment..."
-                        eval "$(/usr/local/bin/brew shellenv)"
-                        # Add to profile for future sessions
-                        if ! grep -q "brew shellenv" ~/.zprofile; then
-                            echo 'eval "$(/usr/local/bin/brew shellenv)"' >> ~/.zprofile
-                        fi
-                    fi
-                    
-                    if ! command_exists brew; then
-                        print_error "Failed to set up Homebrew. Please install prerequisites manually."
-                        print_error "For wget: brew install wget"
-                        print_error "For git: brew install git"
-                        exit 1
+                    # Ask for confirmation before installing Homebrew
+                    if ! install_homebrew_with_confirmation; then
+                        print_error "Cannot continue without Homebrew on macOS."
+                        return 1
                     fi
                 fi
                 
@@ -687,6 +663,44 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Function to install Homebrew with user confirmation
+install_homebrew_with_confirmation() {
+    print_warning "Homebrew is not installed but needed to install packages on macOS"
+    read -p "Would you like to install Homebrew? (y/n): " install_homebrew
+    if [[ $install_homebrew =~ ^[Yy]$ ]]; then
+        print_status "Installing Homebrew..."
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        
+        # Add Homebrew to PATH based on Mac architecture
+        if [ -d "/opt/homebrew" ]; then
+            # Apple Silicon (M1/M2)
+            print_status "Setting up Homebrew environment..."
+            eval "$(/opt/homebrew/bin/brew shellenv)"
+            # Add to profile for future sessions
+            if ! grep -q "brew shellenv" ~/.zprofile; then
+                echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+            fi
+        elif [ -d "/usr/local/Homebrew" ]; then
+            # Intel Mac
+            print_status "Setting up Homebrew environment..."
+            eval "$(/usr/local/bin/brew shellenv)"
+            # Add to profile for future sessions
+            if ! grep -q "brew shellenv" ~/.zprofile; then
+                echo 'eval "$(/usr/local/bin/brew shellenv)"' >> ~/.zprofile
+            fi
+        fi
+        
+        if ! command_exists brew; then
+            print_error "Failed to set up Homebrew. Please install prerequisites manually."
+            return 1
+        fi
+        return 0
+    else
+        print_warning "Homebrew installation was declined. Some functionality may be limited."
+        return 1
+    fi
+}
+
 # Function to check and install Docker
 install_docker() {
     if command_exists docker; then
@@ -725,31 +739,11 @@ install_docker() {
             
             # Check if Homebrew is installed
             if ! command_exists brew; then
-                print_status "Installing Homebrew first..."
-                /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-                
-                # Add Homebrew to PATH based on Mac architecture
-                if [ -d "/opt/homebrew" ]; then
-                    # Apple Silicon (M1/M2)
-                    print_status "Setting up Homebrew environment..."
-                    eval "$(/opt/homebrew/bin/brew shellenv)"
-                    # Add to profile for future sessions
-                    if ! grep -q "brew shellenv" ~/.zprofile; then
-                        echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
-                    fi
-                elif [ -d "/usr/local/Homebrew" ]; then
-                    # Intel Mac
-                    print_status "Setting up Homebrew environment..."
-                    eval "$(/usr/local/bin/brew shellenv)"
-                    # Add to profile for future sessions
-                    if ! grep -q "brew shellenv" ~/.zprofile; then
-                        echo 'eval "$(/usr/local/bin/brew shellenv)"' >> ~/.zprofile
-                    fi
-                fi
-                
-                if ! command_exists brew; then
-                    print_error "Failed to set up Homebrew. Cannot install Docker."
-                    exit 1
+                # Ask for confirmation before installing Homebrew
+                if ! install_homebrew_with_confirmation; then
+                    print_error "Cannot install Docker Desktop without Homebrew on macOS."
+                    print_warning "Please install Docker Desktop manually from https://www.docker.com/products/docker-desktop"
+                    return 1
                 fi
             fi
             
@@ -880,26 +874,10 @@ install_python_requirements() {
     if is_macos; then
         # For macOS, use Homebrew
         if ! command_exists brew; then
-            print_status "Installing Homebrew first..."
-            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-            
-            # Add Homebrew to PATH based on Mac architecture
-            if [ -d "/opt/homebrew" ]; then
-                # Apple Silicon (M1/M2)
-                print_status "Setting up Homebrew environment..."
-                eval "$(/opt/homebrew/bin/brew shellenv)"
-                # Add to profile for future sessions
-                if ! grep -q "brew shellenv" ~/.zprofile; then
-                    echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
-                fi
-            elif [ -d "/usr/local/Homebrew" ]; then
-                # Intel Mac
-                print_status "Setting up Homebrew environment..."
-                eval "$(/usr/local/bin/brew shellenv)"
-                # Add to profile for future sessions
-                if ! grep -q "brew shellenv" ~/.zprofile; then
-                    echo 'eval "$(/usr/local/bin/brew shellenv)"' >> ~/.zprofile
-                fi
+            # Ask for confirmation before installing Homebrew
+            if ! install_homebrew_with_confirmation; then
+                print_error "Cannot install Python requirements without Homebrew on macOS."
+                return 1
             fi
         fi
 
@@ -1048,12 +1026,10 @@ install_polaris() {
     if is_macos; then
         # For macOS, use Homebrew
         if ! command_exists brew; then
-            print_status "Setting up Homebrew first..."
-            # Configure Homebrew PATH if needed
-            if [ -d "/opt/homebrew" ]; then
-                eval "$(/opt/homebrew/bin/brew shellenv)"
-            elif [ -d "/usr/local/Homebrew" ]; then
-                eval "$(/usr/local/bin/brew shellenv)"
+            # Ask for confirmation before installing Homebrew
+            if ! install_homebrew_with_confirmation; then
+                print_error "Cannot continue without Homebrew on macOS for installing required packages."
+                return 1
             fi
         fi
         brew install curl wget git
@@ -1079,12 +1055,10 @@ install_polaris() {
                 if is_macos; then
                     # For macOS, use Homebrew
                     if ! command_exists brew; then
-                        print_status "Setting up Homebrew first..."
-                        # Configure Homebrew PATH if needed
-                        if [ -d "/opt/homebrew" ]; then
-                            eval "$(/opt/homebrew/bin/brew shellenv)"
-                        elif [ -d "/usr/local/Homebrew" ]; then
-                            eval "$(/usr/local/bin/brew shellenv)"
+                        # Ask for confirmation before installing Homebrew
+                        if ! install_homebrew_with_confirmation; then
+                            print_error "Cannot continue without Homebrew for Python installation on macOS."
+                            return 1
                         fi
                     fi
                     brew install python@3.10
@@ -1116,30 +1090,13 @@ install_polaris() {
             if is_macos; then
                 # For macOS, use Homebrew
                 if ! command_exists brew; then
-                    print_status "Setting up Homebrew first..."
-                    # Configure Homebrew PATH if needed
-                    if [ -d "/opt/homebrew" ]; then
-                        eval "$(/opt/homebrew/bin/brew shellenv)"
-                    elif [ -d "/usr/local/Homebrew" ]; then
-                        eval "$(/usr/local/bin/brew shellenv)"
+                    # Ask for confirmation before installing Homebrew
+                    if ! install_homebrew_with_confirmation; then
+                        print_error "Cannot continue without Homebrew for Python installation on macOS."
+                        return 1
                     fi
                 fi
                 brew install python@3.10
-                brew link --force python@3.10
-            else
-                # For Linux, use apt with deadsnakes PPA
-                sudo apt-get install -y software-properties-common
-                sudo add-apt-repository -y ppa:deadsnakes/ppa
-                sudo apt-get update
-                sudo apt-get install -y python3.10 python3.10-venv python3.10-dev python3-pip
-            fi
-            
-            print_success "Python 3.10 installed successfully!"
-        else
-            print_error "Cannot continue without Python 3."
-            return 1
-        fi
-    fi
 
     # Install Docker
     install_docker
