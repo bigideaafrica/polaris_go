@@ -1189,32 +1189,48 @@ install_polaris() {
             print_status "Installing Python dependencies in the correct order..."
             
             # First upgrade pip
-            pip install --upgrade pip
+            print_status "Upgrading pip..."
+            # Check if we're dealing with externally managed Python
+            if pip3 install --upgrade pip 2>&1 | grep -q "externally-managed-environment"; then
+                print_warning "Detected externally-managed Python environment"
+                print_warning "Using --break-system-packages flag to override (required for Python 3.12+ on some distros)"
+                pip3 install --break-system-packages --upgrade pip
+                
+                # Define a helper function for pip installs
+                pip_install() {
+                    pip install --break-system-packages "$@"
+                }
+            else
+                # Define a helper function for standard pip installs
+                pip_install() {
+                    pip install "$@"
+                }
+            fi
             
             # Install network-specific packages in the correct order
             print_status "Installing Bittensor and related packages..."
-            pip install bittensor
+            pip_install bittensor
             check_command "Failed to install bittensor" 0
             
-            pip install bittensor-cli
+            pip_install bittensor-cli
             check_command "Failed to install bittensor-cli" 0
             
-            pip install communex==0.1.36.4
+            pip_install communex==0.1.36.4
             check_command "Failed to install communex" 0
 
             # Now install the rest of the requirements
             print_status "Installing remaining dependencies..."
             if [ -f "requirements.txt" ]; then
-            pip install -r requirements.txt
-            check_command "Failed to install requirements" 0
+                pip_install -r requirements.txt
+                check_command "Failed to install requirements" 0
             else
                 print_warning "No requirements.txt found. Installing common dependencies..."
-                pip install click tabulate GitPython click-spinner rich loguru inquirer requests xlsxwriter pyyaml psutil python-dotenv pid
+                pip_install click tabulate GitPython click-spinner rich loguru inquirer requests xlsxwriter pyyaml psutil python-dotenv pid
             fi
 
             # Install Polaris in development mode
             print_status "Installing Polaris in development mode..."
-            pip install -e .
+            pip_install -e .
             check_command "Failed to install Polaris" 0
             
             # Verify polaris command is available
@@ -1265,8 +1281,22 @@ install_polaris() {
             
             # Upgrade pip
             print_status "Upgrading pip..."
-            pip install --upgrade pip
-            check_command "Failed to upgrade pip" 0
+            # Check if we're dealing with externally managed Python
+            if pip3 install --upgrade pip 2>&1 | grep -q "externally-managed-environment"; then
+                print_warning "Detected externally-managed Python environment"
+                print_warning "Using --break-system-packages flag to override (required for Python 3.12+ on some distros)"
+                pip3 install --break-system-packages --upgrade pip
+                
+                # Define a helper function for pip installs
+                pip_install() {
+                    pip install --break-system-packages "$@"
+                }
+            else
+                # Define a helper function for standard pip installs
+                pip_install() {
+                    pip install "$@"
+                }
+            fi
             
             # Check if requirements.txt exists
             if [ ! -f "requirements.txt" ]; then
@@ -1291,23 +1321,23 @@ EOF
             
             # Install bittensor and related packages first
             print_status "Installing Bittensor and related packages..."
-            pip install bittensor
+            pip_install bittensor
             check_command "Failed to install bittensor" 0
             
-            pip install bittensor-cli
+            pip_install bittensor-cli
             check_command "Failed to install bittensor-cli" 0
             
-            pip install communex==0.1.36.4
+            pip_install communex==0.1.36.4
             check_command "Failed to install communex" 0
             
             # Install requirements
             print_status "Installing Python requirements..."
-            pip install -r requirements.txt
+            pip_install -r requirements.txt
             check_command "Failed to install requirements" 0
             
             # Install Polaris in development mode
             print_status "Installing Polaris in development mode..."
-            pip install -e .
+            pip_install -e .
             check_command "Failed to install Polaris" 0
             
             # Verify polaris command is available
@@ -1580,7 +1610,22 @@ EOF
     
     # Upgrade pip
     print_status "Upgrading pip..."
-    pip install --upgrade pip
+    # Check if we're dealing with externally managed Python
+    if pip3 install --upgrade pip 2>&1 | grep -q "externally-managed-environment"; then
+        print_warning "Detected externally-managed Python environment"
+        print_warning "Using --break-system-packages flag to override (required for Python 3.12+ on some distros)"
+        pip3 install --break-system-packages --upgrade pip
+        
+        # Define a helper function for pip installs
+        pip_install() {
+            pip install --break-system-packages "$@"
+        }
+    else
+        # Define a helper function for standard pip installs
+        pip_install() {
+            pip install "$@"
+        }
+    fi
     check_command "Failed to upgrade pip" 0
     
     # Check if requirements.txt exists
@@ -1606,23 +1651,23 @@ EOF
     
     # Install bittensor and related packages first
     print_status "Installing Bittensor and related packages..."
-    pip install bittensor
+    pip_install bittensor
     check_command "Failed to install bittensor" 0
     
-    pip install bittensor-cli
+    pip_install bittensor-cli
     check_command "Failed to install bittensor-cli" 0
     
-    pip install communex==0.1.36.4
+    pip_install communex==0.1.36.4
     check_command "Failed to install communex" 0
     
     # Install requirements
     print_status "Installing Python requirements..."
-    pip install -r requirements.txt
+    pip_install -r requirements.txt
     check_command "Failed to install requirements" 0
     
     # Install Polaris in development mode
     print_status "Installing Polaris in development mode..."
-    pip install -e .
+    pip_install -e .
     check_command "Failed to install Polaris" 0
     
     # Create a more robust direct runner script for convenience
