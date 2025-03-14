@@ -504,35 +504,50 @@ enter_polaris_environment() {
         return 1
     fi
 
-    # Simplified check - skip checking for virtual environment and polaris command
-    print_status "Simplified environment check - only verifying folder exists..."
-    print_success "Found Polaris folder at: $(pwd)/polariscloud"
+    # Get the absolute path to polariscloud
+    local polaris_dir=$(realpath "$(pwd)/polariscloud")
+    print_status "Using Polaris directory: $polaris_dir"
     
     # Show simplified environment message
     clear
-    echo -e "${CYAN}${BOLD}Welcome to Polaris Environment (Simplified)${NC}"
+    echo -e "${CYAN}${BOLD}Welcome to Polaris Environment${NC}"
     echo -e "${GREEN}─────────────────────────────────────────────────────${NC}"
-    echo -e "${YELLOW}NOTE: This is a simplified environment entry. ${NC}"
-    echo -e "${YELLOW}Virtual environment and command checks have been bypassed.${NC}"
+    echo -e "${YELLOW}Polaris directory: ${CYAN}$polaris_dir${NC}"
     echo
-    echo -e "${YELLOW}Assuming Polaris is available with standard commands:${NC}"
+    echo -e "${YELLOW}Available Polaris commands:${NC}"
     echo -e "• ${CYAN}polaris start${NC}     - Start Polaris services"
     echo -e "• ${CYAN}polaris stop${NC}      - Stop Polaris services"
     echo -e "• ${CYAN}polaris status${NC}    - Check service status"
     echo -e "• ${CYAN}polaris logs${NC}      - View service logs"
-    echo -e "• ${CYAN}polaris register${NC}  - Register as a new miner"
     echo -e "• ${CYAN}polaris --help${NC}    - Show all available commands"
     echo
     
     # Change to polariscloud directory and activate virtual environment
-    cd polariscloud 2>/dev/null
+    cd "$polaris_dir"
     
     # Check if virtual environment exists
     if [ -d "venv" ] && [ -f "venv/bin/activate" ]; then
-        source venv/bin/activate
-        print_success "Virtual environment activated in polariscloud directory."
+        print_status "Activating virtual environment..."
+        source "$polaris_dir/venv/bin/activate"
+        print_success "Virtual environment activated."
+        
+        # Check if polaris command exists
+        if command -v polaris &>/dev/null; then
+            polaris_path=$(command -v polaris)
+            print_success "Polaris command found at: $polaris_path"
+        elif command -v pcli &>/dev/null; then
+            pcli_path=$(command -v pcli)
+            print_success "PCLI command found at: $pcli_path"
+        elif [ -f "$polaris_dir/polaris_run" ]; then
+            print_success "Using local Polaris runner script."
+            print_status "Creating alias for polaris command..."
+            alias polaris="$polaris_dir/polaris_run"
+        else
+            print_warning "Neither polaris nor pcli command found in PATH!"
+            print_warning "Commands may not work correctly. Consider reinstalling Polaris."
+        fi
     else
-        print_warning "Virtual environment not found in polariscloud directory!"
+        print_warning "Virtual environment not found at $polaris_dir/venv!"
         print_warning "Commands may not work correctly. Consider reinstalling Polaris."
     fi
     
@@ -548,9 +563,9 @@ enter_polaris_environment() {
     if [ -n "$VIRTUAL_ENV" ]; then
         deactivate
     fi
-    
+
     # Go back to the original directory if we changed to polariscloud
-    cd .. 2>/dev/null
+    cd - &>/dev/null
     echo -e "${GREEN}Exited Polaris environment.${NC}"
 }
 
@@ -1051,6 +1066,29 @@ install_polaris() {
     echo -e "${YELLOW}═══════════════════════════════════════════════════════${NC}"
     echo
 
+    # Get absolute path to current directory to ensure consistency
+    local current_dir=$(pwd)
+    local polaris_dir="$current_dir/polariscloud"
+    print_status "Installing Polaris in: $polaris_dir"
+    
+    # Check for and warn about any conflicting aliases
+    print_status "Checking for conflicting aliases..."
+    if grep -q "alias polaris=" ~/.bashrc 2>/dev/null; then
+        print_warning "Found a 'polaris' alias in your ~/.bashrc file!"
+        echo -e "${YELLOW}This may cause conflicts with the Polaris command.${NC}"
+        read -p "Would you like to remove this alias? (y/n): " remove_alias
+        if [[ $remove_alias =~ ^[Yy]$ ]]; then
+            print_status "Removing 'polaris' alias from ~/.bashrc..."
+            # Back up .bashrc first
+            cp ~/.bashrc ~/.bashrc.bak.$(date +%Y%m%d%H%M%S)
+            # Remove the alias line
+            sed -i '/alias polaris=/d' ~/.bashrc
+            print_success "Alias removed. You'll need to open a new terminal or run 'source ~/.bashrc' for changes to take effect."
+        else
+            print_warning "Alias not removed. This may cause the 'polaris' command to behave unexpectedly."
+        fi
+    fi
+
     # Check if polariscloud already exists
     if [ -d "polariscloud" ]; then
         print_status "Found existing polariscloud directory."
@@ -1060,7 +1098,7 @@ install_polaris() {
             print_status "Found existing virtual environment inside polariscloud."
             # Activate the virtual environment and install polaris
             cd polariscloud
-            source venv/bin/activate
+            source "$polaris_dir/venv/bin/activate"
             
             print_status "Installing Polaris in the existing environment..."
             
@@ -1084,32 +1122,118 @@ install_polaris() {
             # Now install the rest of the requirements
             print_status "Installing remaining dependencies..."
             if [ -f "requirements.txt" ]; then
-                pip install -r requirements.txt
-                check_command "Failed to install requirements" 0
+            pip install -r requirements.txt
+            check_command "Failed to install requirements" 0
             else
                 print_warning "No requirements.txt found. Installing common dependencies..."
                 pip install click tabulate GitPython click-spinner rich loguru inquirer requests xlsxwriter pyyaml psutil python-dotenv pid
             fi
 
             # Install Polaris in development mode
+            print_status "Installing Polaris in development mode..."
             pip install -e .
             check_command "Failed to install Polaris" 0
             
             # Verify polaris command is available
             if command -v polaris &>/dev/null || command -v pcli &>/dev/null; then
-                print_success "Polaris command successfully installed!"
+                polaris_path=$(which polaris 2>/dev/null || which pcli 2>/dev/null)
+                print_success "Polaris command successfully installed at: $polaris_path"
             else
-                print_error "Failed to install polaris command. Please check your environment."
-                deactivate
-                cd ..
-                return 1
+                print_warning "Could not find polaris or pcli command in PATH."
+                print_status "Creating runner script for Polaris..."
             fi
         fi
         
         # Setup configuration regardless of whether we just installed or already had a venv
         # Stay in the polariscloud directory if we're already there, otherwise go there
-        if [ ! "$PWD" = "$(pwd)/polariscloud" ] && [ ! "$PWD" = "$(realpath ./polariscloud)" ]; then
-            cd polariscloud
+        if [ ! "$PWD" = "$polaris_dir" ]; then
+            cd "$polaris_dir"
+        fi
+        
+        # Create a more robust direct runner script for convenience
+        print_status "Creating robust polaris runner script..."
+        cat > polaris_run << EOF
+#!/bin/bash
+
+# polaris_run - Direct runner for Polaris commands
+# This script activates the virtual environment and runs polaris with any arguments
+
+# Get the directory of this script (works even if script is symlinked)
+SCRIPT_DIR="\$(cd "\$(dirname "\$(readlink -f "\${BASH_SOURCE[0]}")")" && pwd)"
+
+# Ensure we're in the polariscloud directory
+cd "\$SCRIPT_DIR"
+
+# Activate the virtual environment
+source "\$SCRIPT_DIR/venv/bin/activate"
+
+# Check if polaris command exists in PATH or try alternatives
+if command -v polaris &>/dev/null; then
+    polaris "\$@"
+elif command -v pcli &>/dev/null; then
+    pcli "\$@"
+elif [ -f "\$SCRIPT_DIR/polaris" ] && [ ! -L "\$SCRIPT_DIR/polaris" ]; then
+    # If polaris exists and is not a symlink (to avoid infinite recursion)
+    "\$SCRIPT_DIR/polaris" "\$@"
+else
+    echo "Error: Could not find polaris or pcli command."
+    echo "Please ensure Polaris is properly installed."
+    exit 1
+fi
+
+# Deactivate the virtual environment when done
+deactivate
+EOF
+
+        chmod +x polaris_run
+        
+        # Create a symlink called polaris if it doesn't exist
+        if [ ! -f "polaris" ] || [ -L "polaris" ]; then
+            ln -sf polaris_run polaris
+            chmod +x polaris
+        fi
+        
+        # Setup bash profile to include polariscloud in PATH
+        print_status "Setting up PATH to include the Polaris directory..."
+        
+        # Determine which shell profile file to use
+        local profile_file=""
+        if [ -f ~/.bash_profile ]; then
+            profile_file=~/.bash_profile
+        elif [ -f ~/.profile ]; then
+            profile_file=~/.profile
+        else
+            profile_file=~/.bashrc
+        fi
+        
+        # Add polariscloud to PATH if not already there
+        if ! grep -q "export PATH=.*$polaris_dir" "$profile_file" 2>/dev/null; then
+            echo "# Added by Polaris installer" >> "$profile_file"
+            echo "export PATH=\"$polaris_dir:\$PATH\"" >> "$profile_file"
+            print_success "Added Polaris directory to your PATH in $profile_file"
+            print_warning "You'll need to open a new terminal or run 'source $profile_file' for this to take effect."
+        else
+            print_success "Polaris directory is already in your PATH."
+        fi
+        
+        # Continue with the rest of the installation...
+        
+        # Create a shell wrapper in /usr/local/bin if possible
+        if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
+            print_status "Creating system-wide polaris command..."
+            
+            cat > /usr/local/bin/polaris << EOF
+#!/bin/bash
+# System-wide wrapper for Polaris commands
+
+# Run the polaris command from the installed directory
+"$polaris_dir/polaris_run" "\$@"
+EOF
+            chmod +x /usr/local/bin/polaris
+            print_success "Created system-wide 'polaris' command in /usr/local/bin"
+        elif [ -d "/usr/local/bin" ]; then
+            print_warning "Could not create system-wide command (permission denied)."
+            print_warning "To create it manually, run: sudo ln -sf \"$polaris_dir/polaris_run\" /usr/local/bin/polaris"
         fi
         
         # Always create the environment file
@@ -1186,8 +1310,8 @@ EOF
         fi
         
         # Return to parent directory if we started there
-        if [ "$PWD" != "$(realpath ..)" ]; then
-            cd ..
+        if [ "$PWD" != "$current_dir" ]; then
+            cd "$current_dir"
         fi
         
         print_success "Polaris installation and configuration completed successfully!"
@@ -1209,21 +1333,21 @@ EOF
     fi
 
     # Change directory to polariscloud
-    cd polariscloud
+                cd polariscloud
     print_status "Setting up Polaris in $(pwd)..."
     
     # Create virtual environment
     print_status "Creating virtual environment..."
-    python3 -m venv venv
+                python3 -m venv venv
     check_command "Failed to create virtual environment" 1
     
     # Activate the virtual environment
-    source venv/bin/activate
+    source "$polaris_dir/venv/bin/activate"
     check_command "Failed to activate virtual environment" 1
     
     # Upgrade pip
     print_status "Upgrading pip..."
-    pip install --upgrade pip
+                pip install --upgrade pip
     check_command "Failed to upgrade pip" 0
     
     # Check if requirements.txt exists
@@ -1260,7 +1384,7 @@ EOF
     
     # Install requirements
     print_status "Installing Python requirements..."
-    pip install -r requirements.txt
+                pip install -r requirements.txt
     check_command "Failed to install requirements" 0
     
     # Install Polaris in development mode
@@ -1268,44 +1392,104 @@ EOF
     pip install -e .
     check_command "Failed to install Polaris" 0
     
-    # Create a direct runner script for convenience
-    print_status "Creating direct runner script..."
+    # Create a more robust direct runner script for convenience
+    print_status "Creating robust polaris runner script..."
     cat > polaris_run << EOF
 #!/bin/bash
 
 # polaris_run - Direct runner for Polaris commands
 # This script activates the virtual environment and runs polaris with any arguments
 
-# Activate the virtual environment
-source "$(pwd)/venv/bin/activate"
+# Get the directory of this script (works even if script is symlinked)
+SCRIPT_DIR="\$(cd "\$(dirname "\$(readlink -f "\${BASH_SOURCE[0]}")")" && pwd)"
 
-# Run polaris with all arguments passed to this script
-polaris "\$@"
+# Ensure we're in the polariscloud directory
+cd "\$SCRIPT_DIR"
+
+# Activate the virtual environment
+source "\$SCRIPT_DIR/venv/bin/activate"
+
+# Check if polaris command exists in PATH or try alternatives
+if command -v polaris &>/dev/null; then
+    polaris "\$@"
+elif command -v pcli &>/dev/null; then
+    pcli "\$@"
+elif [ -f "\$SCRIPT_DIR/polaris" ] && [ ! -L "\$SCRIPT_DIR/polaris" ]; then
+    # If polaris exists and is not a symlink (to avoid infinite recursion)
+    "\$SCRIPT_DIR/polaris" "\$@"
+else
+    echo "Error: Could not find polaris or pcli command."
+    echo "Please ensure Polaris is properly installed."
+    exit 1
+fi
 
 # Deactivate the virtual environment when done
 deactivate
 EOF
-
     chmod +x polaris_run
     
     # Create a symlink called polaris if it doesn't exist
-    if [ ! -L "polaris" ]; then
-        ln -s polaris_run polaris
+    if [ ! -f "polaris" ] || [ -L "polaris" ]; then
+        ln -sf polaris_run polaris
         chmod +x polaris
     fi
     
-    # Get public IP for configuration
-    print_status "Setting up configuration..."
+    # Setup bash profile to include polariscloud in PATH
+    print_status "Setting up PATH to include the Polaris directory..."
+    
+    # Determine which shell profile file to use
+    local profile_file=""
+    if [ -f ~/.bash_profile ]; then
+        profile_file=~/.bash_profile
+    elif [ -f ~/.profile ]; then
+        profile_file=~/.profile
+    else
+        profile_file=~/.bashrc
+    fi
+    
+    # Add polariscloud to PATH if not already there
+    if ! grep -q "export PATH=.*$polaris_dir" "$profile_file" 2>/dev/null; then
+        echo "# Added by Polaris installer" >> "$profile_file"
+        echo "export PATH=\"$polaris_dir:\$PATH\"" >> "$profile_file"
+        print_success "Added Polaris directory to your PATH in $profile_file"
+        print_warning "You'll need to open a new terminal or run 'source $profile_file' for this to take effect."
+    else
+        print_success "Polaris directory is already in your PATH."
+    fi
+    
+    # Continue with the rest of the installation...
+    
+    # Create a shell wrapper in /usr/local/bin if possible
+    if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
+        print_status "Creating system-wide polaris command..."
+        
+        cat > /usr/local/bin/polaris << EOF
+#!/bin/bash
+# System-wide wrapper for Polaris commands
+
+# Run the polaris command from the installed directory
+"$polaris_dir/polaris_run" "\$@"
+EOF
+        chmod +x /usr/local/bin/polaris
+        print_success "Created system-wide 'polaris' command in /usr/local/bin"
+    elif [ -d "/usr/local/bin" ]; then
+        print_warning "Could not create system-wide command (permission denied)."
+        print_warning "To create it manually, run: sudo ln -sf \"$polaris_dir/polaris_run\" /usr/local/bin/polaris"
+    fi
+    
+    # Always create the environment file
+    print_status "Setting up environment configuration..."
+    
+    # Get public IP
     get_public_ip
-    # Use the global variable
     public_ip="$DETECTED_PUBLIC_IP"
     
-    # Setup SSH configuration
+    # Always get SSH configuration
     print_status "Setting up SSH configuration..."
     setup_ssh_configuration
     
     # Create .env file
-    print_status "Creating environment file with configuration..."
+    print_status "Creating .env file with configuration..."
     create_env_file
     
     # Validate .env file
@@ -1366,9 +1550,10 @@ EOF
         print_warning "Please update these values for security reasons."
     fi
     
-    # Deactivate the virtual environment and return to the original directory
-    deactivate
-    cd ..
+    # Return to parent directory if we started there
+    if [ "$PWD" != "$current_dir" ]; then
+        cd "$current_dir"
+    fi
     
     print_success "Polaris installation and configuration completed successfully!"
     
@@ -1378,788 +1563,6 @@ EOF
     
     # Ask user if they want to start Polaris immediately
     ask_to_start_polaris
-}
-
-# Function to set up SSH key authentication
-setup_ssh_key_auth() {
-    print_status "Setting up SSH key authentication..."
-    
-    # Check if SSH key exists
-    if [ ! -f ~/.ssh/id_rsa ]; then
-        print_status "Generating SSH key pair..."
-        ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
-        check_command "Failed to generate SSH key pair" 0
-    fi
-    
-    print_success "SSH key setup complete!"
-    echo
-    print_status "Your public key is:"
-    cat ~/.ssh/id_rsa.pub
-    echo
-    print_warning "You'll need to add this public key to authorized_keys on your servers"
-    print_warning "or distribute it to your clients."
-    echo
-}
-
-# Function to show advanced options
-show_advanced_options() {
-    clear
-    echo -e "${CYAN}${BOLD}Advanced Options:${NC}"
-    echo -e "${GREEN}─────────────────────────────────────────────────────${NC}"
-    echo -e "1) ${BLUE}Update Polaris to Latest Version${NC}"
-    echo -e "2) ${YELLOW}Repair Docker Installation${NC}"
-    echo -e "3) ${CYAN}Configure Firewall for Polaris${NC}"
-    echo -e "4) ${MAGENTA}Troubleshoot Common Issues${NC}"
-    echo -e "5) ${GREEN}Back to Main Menu${NC}"
-    echo -e "${GREEN}─────────────────────────────────────────────────────${NC}"
-    echo
-    read -p "Please select an option [1-5]: " adv_choice
-    echo
-
-    case $adv_choice in
-        1)
-            update_polaris
-            ;;
-        2)
-            repair_docker
-            ;;
-        3)
-            configure_firewall
-            ;;
-        4)
-            troubleshoot_issues
-            ;;
-        5)
-            return 0
-            ;;         *)
-            print_error "Invalid option"
-            sleep 1
-            show_advanced_options
-            ;;
-    esac
-}
-
-# Function to update Polaris to latest version
-update_polaris() {
-    if ! check_polaris_installation; then
-        print_error "Polaris is not installed. Please install it first."
-        read -p "Press Enter to continue..."
-        return 1
-    fi
-
-    print_status "Updating Polaris to the latest version..."
-    
-    # Backup before update
-    print_status "Creating backup before update..."
-    backup_polaris_config
-    
-    # Update the code
-    cd polariscloud
-    print_status "Pulling latest changes from repository..."
-    git pull
-    check_command "Failed to pull latest changes" 0
-    
-    # Update dependencies
-    print_status "Updating dependencies..."
-    source venv/bin/activate
-    pip install --upgrade pip
-    pip install -r requirements.txt --upgrade
-    check_command "Failed to update dependencies" 0
-    
-    # Reinstall the package
-    pip install -e . --upgrade
-    check_command "Failed to reinstall the package" 0
-    
-    print_status "Restarting Polaris services..."
-    polaris restart
-    check_command "Failed to restart Polaris services" 0
-    
-    deactivate
-    cd ..
-    
-    print_success "Polaris has been updated successfully!"
-    read -p "Press Enter to continue..."
-}
-
-# Function to repair Docker installation
-repair_docker() {
-    print_status "Checking Docker installation..."
-    
-    if ! command_exists docker; then
-        print_warning "Docker is not installed. Installing Docker..."
-        install_docker
-        read -p "Press Enter to continue..."
-        return
-    fi
-    
-    # Check if Docker daemon is running
-    if ! docker info &>/dev/null; then
-        print_warning "Docker daemon is not running. Attempting to start..."
-        if pidof systemd >/dev/null; then
-            sudo systemctl start docker
-            if ! docker info &>/dev/null; then
-                print_error "Failed to start Docker daemon. Trying to reinstall..."
-                sudo apt-get remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-                install_docker
-            else
-                print_success "Docker daemon started successfully!"
-            fi
-        else
-            print_warning "No systemd detected. Trying to start Docker service manually..."
-            sudo service docker start
-            if ! docker info &>/dev/null; then
-                print_error "Failed to start Docker service. Trying to reinstall..."
-                sudo apt-get remove -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-                install_docker
-            else
-                print_success "Docker service started successfully!"
-            fi
-        fi
-    else
-        print_success "Docker is installed and running correctly!"
-        
-        # Verify user is in docker group
-        if ! groups | grep -q docker; then
-            print_warning "Your user is not in the docker group. Adding..."
-            sudo usermod -aG docker $USER
-            print_warning "You need to log out and log back in for this change to take effect."
-        fi
-    fi
-    
-    read -p "Press Enter to continue..."
-}
-
-# Function to configure firewall for Polaris
-configure_firewall() {
-    print_status "Configuring firewall for Polaris..."
-    
-    # Check if ufw is installed
-    if ! command_exists ufw; then
-        print_warning "UFW (Uncomplicated Firewall) is not installed."
-        read -p "Do you want to install UFW? (y/n): " install_ufw
-        if [[ $install_ufw =~ ^[Yy]$ ]]; then
-            sudo apt-get update
-            sudo apt-get install -y ufw
-            check_command "Failed to install UFW" 0
-        else
-            print_warning "Firewall configuration aborted."
-            read -p "Press Enter to continue..."
-            return
-        fi
-    fi
-    
-    # Check if the .env file exists to get port ranges
-    if [ -f "polariscloud/.env" ]; then
-        source polariscloud/.env
-        
-        # Allow SSH ports
-        if [ ! -z "$SSH_PORT_RANGE_START" ] && [ ! -z "$SSH_PORT_RANGE_END" ]; then
-            print_status "Allowing SSH port range $SSH_PORT_RANGE_START to $SSH_PORT_RANGE_END..."
-            for port in $(seq $SSH_PORT_RANGE_START $SSH_PORT_RANGE_END); do
-                sudo ufw allow $port/tcp
-            done
-        fi
-        
-        # Allow API port
-        if [ ! -z "$API_PORT" ]; then
-            print_status "Allowing API port $API_PORT..."
-            sudo ufw allow $API_PORT/tcp
-        fi
-        
-        # Enable UFW if it's not already enabled
-        if ! sudo ufw status | grep -q "Status: active"; then
-            print_warning "UFW is not enabled. Enabling..."
-            print_warning "This might disconnect your SSH session if port 22 is not allowed."
-            read -p "Are you sure you want to enable UFW? (y/n): " enable_ufw
-            if [[ $enable_ufw =~ ^[Yy]$ ]]; then
-                # Make sure SSH is allowed to prevent lockout
-                sudo ufw allow 22/tcp
-                sudo ufw --force enable
-            fi
-        fi
-        
-        print_success "Firewall configured successfully!"
-    else
-        print_error "Could not find Polaris configuration (.env file)."
-        print_error "Please install Polaris first or restore a configuration backup."
-    fi
-    
-    read -p "Press Enter to continue..."
-}
-
-# Function to troubleshoot common issues
-troubleshoot_issues() {
-    clear
-    echo -e "${CYAN}${BOLD}Troubleshooting Common Issues:${NC}"
-    echo -e "${GREEN}─────────────────────────────────────────────────────${NC}"
-    echo -e "1) ${RED}Docker permission issues${NC}"
-    echo -e "2) ${RED}SSH connection problems${NC}"
-    echo -e "3) ${RED}Polaris not starting${NC}"
-    echo -e "4) ${RED}Python environment issues${NC}"
-    echo -e "5) ${GREEN}Back to Advanced Options${NC}"
-    echo -e "${GREEN}─────────────────────────────────────────────────────${NC}"
-    echo
-    read -p "Please select an issue to troubleshoot [1-5]: " issue_choice
-    echo
-
-    case $issue_choice in
-        1)
-            troubleshoot_docker_permissions
-            ;;
-        2)
-            troubleshoot_ssh_connection
-            ;;
-        3)
-            troubleshoot_polaris_startup
-            ;;
-        4)
-            troubleshoot_python_env
-            ;;
-        5)
-            show_advanced_options
-            return 0
-            ;;
-        *)
-            print_error "Invalid option"
-            sleep 1
-            troubleshoot_issues
-            ;;
-    esac
-}
-
-# Template function for troubleshooting sections
-troubleshoot_docker_permissions() {
-    clear
-    echo -e "${CYAN}${BOLD}Troubleshooting Docker Permissions:${NC}"
-    echo -e "${GREEN}─────────────────────────────────────────────────────${NC}"
-    echo -e "${YELLOW}Common Docker permission issues:${NC}"
-    echo -e "1. User not in docker group"
-    echo -e "2. Docker daemon not running"
-    echo -e "3. Socket permission issues"
-    echo
-    
-    print_status "Checking if user is in docker group..."
-    if groups | grep -q docker; then
-        print_success "User is in docker group."
-    else
-        print_error "User is NOT in docker group."
-        print_status "Adding user to docker group..."
-        sudo usermod -aG docker $USER
-        print_warning "You need to log out and log back in for this change to take effect."
-    fi
-    
-    print_status "Checking Docker daemon status..."
-    if docker info &>/dev/null; then
-        print_success "Docker daemon is running."
-    else
-        print_error "Docker daemon is NOT running."
-        print_status "Starting Docker daemon..."
-        if pidof systemd >/dev/null; then
-            sudo systemctl start docker
-        else
-            sudo service docker start
-        fi
-    fi
-    
-    print_status "Checking Docker socket permissions..."
-    if [ -S /var/run/docker.sock ]; then
-        socket_perms=$(ls -la /var/run/docker.sock)
-        echo -e "Socket permissions: ${YELLOW}$socket_perms${NC}"
-        
-        if [[ $socket_perms == *"root docker"* ]]; then
-            print_success "Socket permissions appear correct."
-        else
-            print_warning "Socket permissions may be incorrect."
-            print_status "Correcting socket permissions..."
-            sudo chown root:docker /var/run/docker.sock
-        fi
-    else
-        print_error "Docker socket does not exist at /var/run/docker.sock"
-    fi
-    
-    echo
-    read -p "Press Enter to return to the troubleshooting menu..."
-    troubleshoot_issues
-}
-
-# Troubleshooting functions for SSH connection issues
-troubleshoot_ssh_connection() {
-    clear
-    echo -e "${CYAN}${BOLD}Troubleshooting SSH Connection Issues:${NC}"
-    echo -e "${GREEN}─────────────────────────────────────────────────────${NC}"
-    echo -e "${YELLOW}Common SSH connection issues:${NC}"
-    echo -e "1. SSH service not running"
-    echo -e "2. Firewall blocking SSH ports"
-    echo -e "3. Incorrect SSH configuration"
-    echo -e "4. Authentication issues"
-    echo
-    
-    # Check if SSH service is running
-    print_status "Checking if SSH service is running..."
-    if pidof systemd >/dev/null; then
-        if systemctl is-active --quiet ssh || systemctl is-active --quiet sshd; then
-            print_success "SSH service is running."
-        else
-            print_error "SSH service is NOT running."
-            print_status "Starting SSH service..."
-            sudo systemctl start ssh || sudo systemctl start sshd
-        fi
-    else
-        if pgrep sshd >/dev/null; then
-            print_success "SSH daemon is running."
-        else
-            print_error "SSH daemon is NOT running."
-            print_status "Starting SSH daemon..."
-            sudo service ssh start || sudo service sshd start
-        fi
-    fi
-    
-    # Check SSH configuration
-    print_status "Checking SSH configuration..."
-    if [ -f /etc/ssh/sshd_config ]; then
-        if grep -q "^Port " /etc/ssh/sshd_config; then
-            ssh_port=$(grep "^Port " /etc/ssh/sshd_config | awk '{print $2}')
-            echo -e "SSH port configured in sshd_config: ${YELLOW}$ssh_port${NC}"
-        else
-            echo -e "SSH is using the default port: ${YELLOW}22${NC}"
-        fi
-        
-        # Check if password authentication is enabled
-        if grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config; then
-            print_success "Password authentication is enabled."
-        else
-            if grep -q "^PasswordAuthentication no" /etc/ssh/sshd_config; then
-                print_warning "Password authentication is disabled."
-                print_warning "Make sure your SSH keys are properly set up."
-            else
-                print_warning "Password authentication setting not found in sshd_config."
-                print_warning "Default is usually to allow password authentication."
-            fi
-        fi
-    else
-        print_error "SSH configuration file not found at /etc/ssh/sshd_config"
-    fi
-    
-    # Check Polaris SSH settings if available
-    if [ -f "polariscloud/.env" ]; then
-        print_status "Checking Polaris SSH configuration..."
-        source polariscloud/.env
-        
-        if [ ! -z "$SSH_PORT_RANGE_START" ] && [ ! -z "$SSH_PORT_RANGE_END" ]; then
-            echo -e "Polaris SSH port range: ${YELLOW}$SSH_PORT_RANGE_START - $SSH_PORT_RANGE_END${NC}"
-        fi
-        
-        if [ ! -z "$SSH_USER" ]; then
-            echo -e "Polaris SSH user: ${YELLOW}$SSH_USER${NC}"
-        fi
-        
-        if [ ! -z "$SSH_HOST" ]; then
-            echo -e "Polaris SSH host: ${YELLOW}$SSH_HOST${NC}"
-        fi
-    fi
-    
-    # Check firewall settings
-    print_status "Checking firewall settings..."
-    if command_exists ufw; then
-        if sudo ufw status | grep -q "Status: active"; then
-            echo -e "UFW firewall is active."
-            echo -e "SSH ports allowed:"
-            sudo ufw status | grep -E "^[0-9]+/tcp.*ALLOW" | grep -v "^80/tcp"
-        else
-            print_success "UFW firewall is inactive. No firewall blocking SSH connections."
-        fi
-    elif command_exists iptables; then
-        echo -e "Checking iptables rules for SSH ports..."
-        sudo iptables -L -n | grep -i ssh
-    fi
-    
-    echo
-    print_status "Testing SSH connection locally..."
-    if command_exists ssh; then
-        ssh_port=22
-        if [ -f "polariscloud/.env" ] && [ ! -z "$SSH_PORT" ]; then
-            ssh_port=$SSH_PORT
-        fi
-        
-        # Test SSH connection to localhost
-        echo -e "Attempting to connect to localhost on port $ssh_port..."
-        timeout 5 ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -p $ssh_port localhost exit 2>/dev/null
-        if [ $? -eq 0 ]; then
-            print_success "SSH connection to localhost successful!"
-        else
-            print_error "Could not connect to SSH on localhost."
-            print_error "This may indicate a configuration issue."
-        fi
-    fi
-    
-    echo
-    read -p "Press Enter to return to the troubleshooting menu..."
-    troubleshoot_issues
-}
-
-# Troubleshooting function for Polaris startup issues
-troubleshoot_polaris_startup() {
-    clear
-    echo -e "${CYAN}${BOLD}Troubleshooting Polaris Startup Issues:${NC}"
-    echo -e "${GREEN}─────────────────────────────────────────────────────${NC}"
-    echo -e "${YELLOW}Common Polaris startup issues:${NC}"
-    echo -e "1. Missing or incorrect configuration"
-    echo -e "2. Docker not running"
-    echo -e "3. Port conflicts"
-    echo -e "4. Python environment issues"
-    echo
-    
-    if ! check_polaris_installation; then
-        print_error "Polaris is not installed or installation is incomplete."
-        print_error "Please install Polaris first."
-        read -p "Press Enter to return to the troubleshooting menu..."
-        troubleshoot_issues
-        return
-    fi
-    
-    print_status "Checking Polaris configuration..."
-    if [ -f "polariscloud/.env" ]; then
-        print_success "Polaris .env configuration file found."
-        
-        # Check for essential configuration variables
-        source polariscloud/.env
-        local missing_vars=false
-        
-        for var in HOST API_PORT SSH_PORT_RANGE_START SSH_PORT_RANGE_END SSH_USER SSH_PASSWORD SSH_HOST SSH_PORT SERVER_URL; do
-            if [ -z "${!var}" ]; then
-                print_error "Missing configuration: $var"
-                missing_vars=true
-            fi
-        done
-        
-        if [ "$missing_vars" = true ]; then
-            print_warning "Some essential configuration variables are missing."
-            read -p "Would you like to recreate the .env file? (y/n): " recreate_env
-            if [[ $recreate_env =~ ^[Yy]$ ]]; then
-                # Get user inputs to recreate .env
-                cd polariscloud
-                
-                # Back up the existing .env file
-                if [ -f ".env" ]; then
-                    mv .env .env.backup.$(date +%Y%m%d_%H%M%S)
-                fi
-                
-                # Create a new .env file
-                print_status "Creating new .env file..."
-                # Get public IP
-                get_public_ip
-                # Use the global variable
-                public_ip="$DETECTED_PUBLIC_IP"
-
-                # Get SSH username
-                read -p "Enter SSH username: " ssh_user
-
-                # Get SSH password
-                while true; do
-                    read -s -p "Enter SSH password: " ssh_password
-                    echo
-                    read -s -p "Confirm SSH password: " ssh_password_confirm
-                    echo
-                    if [ "$ssh_password" = "$ssh_password_confirm" ]; then
-                        break
-                    else
-                        print_error "Passwords do not match. Please try again."
-                    fi
-                done
-
-                # Get port range
-                get_port_range
-                
-                # Create .env file with template approach
-                cat > .env << EOF
-# Polaris Environment Configuration
-# Values in [brackets] are placeholders that will be replaced
-
-# Server Configuration
-HOST=[server_ip]
-API_PORT=8000
-
-# SSH Configuration
-SSH_PORT_RANGE_START=[port_start]
-SSH_PORT_RANGE_END=[port_end]
-SSH_USER=[ssh_user]
-SSH_PASSWORD=[ssh_password]
-SSH_HOST=[ssh_host]
-SSH_PORT=[ssh_port]
-
-# API Configuration
-SERVER_URL=https://orchestrator-gekh.onrender.com/api/v1
-EOF
-
-                # Fill in the placeholders
-                sed -i "s/\[server_ip\]/$public_ip/g" .env
-                sed -i "s/\[port_start\]/$port_start/g" .env
-                sed -i "s/\[port_end\]/$port_end/g" .env
-                sed -i "s/\[ssh_user\]/$ssh_user/g" .env
-                sed -i "s/\[ssh_host\]/$public_ip/g" .env
-                sed -i "s/\[ssh_port\]/$port_start/g" .env
-                
-                # Handle password (escape special characters)
-                escaped_password=$(printf '%s\n' "$ssh_password" | sed 's/[\/&]/\\&/g')
-                sed -i "s/\[ssh_password\]/$escaped_password/g" .env
-                
-                print_success "New .env file created."
-                cd ..
-            fi
-        fi
-    else
-        print_error "Polaris configuration file (.env) not found."
-        read -p "Would you like to recreate the .env file? (y/n): " recreate_env
-        if [[ $recreate_env =~ ^[Yy]$ ]]; then
-            # Similar logic to recreate .env as above
-            print_status "Please recreate your Polaris configuration manually using option 2 from the main menu."
-        fi
-    fi
-    
-    # Check Docker status
-    print_status "Checking Docker status..."
-    if ! command_exists docker; then
-        print_error "Docker is not installed. Installing Docker..."
-        install_docker
-    elif ! docker info &>/dev/null; then
-        print_error "Docker daemon is not running."
-        if pidof systemd >/dev/null; then
-            print_status "Starting Docker service..."
-            sudo systemctl start docker
-        else
-            print_status "Starting Docker service..."
-            sudo service docker start
-        fi
-    else
-        print_success "Docker is running."
-    fi
-    
-    # Check for port conflicts
-    print_status "Checking for port conflicts..."
-    if [ -f "polariscloud/.env" ]; then
-        source polariscloud/.env
-        
-        if [ ! -z "$API_PORT" ]; then
-            if netstat -tuln 2>/dev/null | grep -q ":$API_PORT"; then
-                process=$(sudo lsof -i :$API_PORT | tail -n 1)
-                print_error "Port $API_PORT is already in use by another process:"
-                echo "$process"
-            else
-                print_success "API port $API_PORT is available."
-            fi
-        fi
-        
-        if [ ! -z "$SSH_PORT" ]; then
-            if netstat -tuln 2>/dev/null | grep -q ":$SSH_PORT"; then
-                process=$(sudo lsof -i :$SSH_PORT | tail -n 1)
-                print_error "SSH port $SSH_PORT is already in use by another process:"
-                echo "$process"
-            else
-                print_success "SSH port $SSH_PORT is available."
-            fi
-        fi
-    fi
-    
-    # Check Polaris status using its command
-    print_status "Checking Polaris service status..."
-    (
-        cd polariscloud
-        source venv/bin/activate
-        polaris status
-        deactivate
-    )
-    
-    # Attempt to restart Polaris if needed
-    read -p "Would you like to restart Polaris services? (y/n): " restart_polaris
-    if [[ $restart_polaris =~ ^[Yy]$ ]]; then
-        print_status "Restarting Polaris services..."
-        (
-            cd polariscloud
-            source venv/bin/activate
-            polaris stop
-            sleep 2
-            polaris start
-            deactivate
-        )
-    fi
-    
-    echo
-    read -p "Press Enter to return to the troubleshooting menu..."
-    troubleshoot_issues
-}
-
-# Troubleshooting function for Python environment issues
-troubleshoot_python_env() {
-    clear
-    echo -e "${CYAN}${BOLD}Troubleshooting Python Environment Issues:${NC}"
-    echo -e "${GREEN}─────────────────────────────────────────────────────${NC}"
-    echo -e "${YELLOW}Common Python environment issues:${NC}"
-    echo -e "1. Missing or corrupted virtual environment"
-    echo -e "2. Missing dependencies"
-    echo -e "3. Python version incompatibility"
-    echo -e "4. Permissions issues"
-    echo
-    
-    # Check Python installation
-    print_status "Checking Python installation..."
-    if command_exists python3; then
-        python_version=$(python3 --version)
-        print_success "$python_version is installed."
-    else
-        print_error "Python 3 is not installed."
-        print_status "Installing Python 3..."
-        sudo apt-get update
-        sudo apt-get install -y python3 python3-venv python3-pip
-    fi
-    
-    # Check virtualenv
-    print_status "Checking virtual environment..."
-    local recreate_venv=false
-    if [ -d "polariscloud/venv" ]; then
-        if [ -f "polariscloud/venv/bin/activate" ]; then
-            print_success "Virtual environment exists."
-            
-            # Check if the virtual environment is functional
-            if (cd polariscloud && source venv/bin/activate && python3 -c "print('venv test')" &>/dev/null); then
-                print_success "Virtual environment is working properly."
-            else
-                print_error "Virtual environment exists but appears to be corrupted."
-                recreate_venv=true
-            fi
-        else
-            print_error "Virtual environment exists but is missing activation script."
-            recreate_venv=true
-        fi
-    else
-        print_error "Virtual environment not found."
-        recreate_venv=true
-    fi
-    
-    # Recreate virtual environment if needed
-    if [ "$recreate_venv" = true ]; then
-        print_warning "Virtual environment needs to be recreated."
-        read -p "Would you like to recreate the virtual environment? (y/n): " recreate_venv_confirm
-        if [[ $recreate_venv_confirm =~ ^[Yy]$ ]]; then
-            print_status "Recreating virtual environment..."
-            
-            if [ -d "polariscloud/venv" ]; then
-                rm -rf polariscloud/venv
-            fi
-            
-            (
-                cd polariscloud
-                python3 -m venv venv
-                if [ $? -ne 0 ]; then
-                    print_error "Failed to create virtual environment."
-                    return 1
-                fi
-                
-                source venv/bin/activate
-                pip install --upgrade pip
-                pip install -r requirements.txt
-                pip install -e .
-                pip install bittensor bittensor-cli communex==0.1.36.4
-                deactivate
-            )
-            
-            print_success "Virtual environment recreated successfully!"
-        fi
-    fi
-    
-    # Check dependencies
-    print_status "Checking Python dependencies..."
-    (
-        cd polariscloud
-        source venv/bin/activate
-        
-        # Check for missing packages in requirements.txt
-        missing_packages=()
-        if [ -f "requirements.txt" ]; then
-            while read -r package; do
-                # Skip empty lines and comments
-                [[ -z "$package" || "$package" =~ ^# ]] && continue
-                
-                # Extract package name (remove version specifiers)
-                package_name=$(echo "$package" | cut -d'=' -f1 | cut -d'>' -f1 | cut -d'<' -f1 | cut -d'~' -f1 | cut -d'!' -f1 | tr -d ' ')
-                
-                # Check if the package is installed
-                pip show "$package_name" &>/dev/null || missing_packages+=("$package")
-            done < requirements.txt
-        fi
-        
-        # Report missing packages
-        if [ ${#missing_packages[@]} -gt 0 ]; then
-            print_error "Missing Python packages detected:"
-            for pkg in "${missing_packages[@]}"; do
-                echo -e "  - ${RED}$pkg${NC}"
-            done
-            
-            read -p "Would you like to install the missing packages? (y/n): " install_missing
-            if [[ $install_missing =~ ^[Yy]$ ]]; then
-                print_status "Installing missing packages..."
-                pip install -r requirements.txt
-            fi
-        else
-            print_success "All required Python packages are installed."
-        fi
-        
-        deactivate
-    )
-    
-    echo
-    read -p "Press Enter to return to the troubleshooting menu..."
-    troubleshoot_issues
-}
-
-# Function to test the polaris command in the virtual environment
-test_polaris_command() {
-    print_status "Testing if polaris command is available in the virtual environment..."
-    
-    if [ ! -d "polariscloud/venv" ] || [ ! -f "polariscloud/venv/bin/activate" ]; then
-        print_error "Virtual environment not found in polariscloud directory!"
-        return 1
-    fi
-    
-    cd polariscloud
-    source venv/bin/activate
-    
-    print_status "Virtual environment activated."
-    print_status "Python version: $(python -V)"
-    print_status "Python executable: $(which python)"
-    
-    if command -v polaris &>/dev/null; then
-        polaris_path=$(command -v polaris)
-        print_success "Polaris command found at: $polaris_path"
-        print_status "Attempting to run 'polaris --help'..."
-        polaris --help
-        if [ $? -eq 0 ]; then
-            print_success "Polaris command works correctly!"
-        else
-            print_error "Polaris command failed to run!"
-        fi
-    elif command -v pcli &>/dev/null; then
-        pcli_path=$(command -v pcli)
-        print_success "PCLI command found at: $pcli_path"
-        print_status "Attempting to run 'pcli --help'..."
-        pcli --help
-        if [ $? -eq 0 ]; then
-            print_success "PCLI command works correctly!"
-        else
-            print_error "PCLI command failed to run!"
-        fi
-    else
-        print_error "Neither polaris nor pcli command found in virtual environment PATH"
-        echo "Content of venv/bin directory:"
-        ls -la venv/bin/
-    fi
-    
-    # Check installed packages
-    print_status "Checking installed Python packages..."
-    pip list | grep -i polaris
-    
-    deactivate
-    cd ..
-    print_status "Virtual environment deactivated."
 }
 
 # Function to set up SSH configuration
@@ -2203,7 +1606,7 @@ create_env_file() {
     print_status "Creating .env file template..."
     
     # First create the template with placeholder brackets
-    cat > .env << EOF
+        cat > .env << EOF
 # Polaris Environment Configuration
 # Values in [brackets] are placeholders that will be replaced
 
@@ -2303,7 +1706,7 @@ ask_to_start_polaris() {
         
         # Try both command names
         if command -v polaris &>/dev/null; then
-            polaris start
+        polaris start
             start_success=$?
         elif command -v pcli &>/dev/null; then
             pcli start
@@ -2318,7 +1721,7 @@ ask_to_start_polaris() {
             echo
             print_status "Showing current status:"
             if command -v polaris &>/dev/null; then
-                polaris status
+            polaris status
             elif command -v pcli &>/dev/null; then
                 pcli status
             fi
