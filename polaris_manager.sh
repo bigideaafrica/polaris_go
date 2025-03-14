@@ -1104,45 +1104,105 @@ install_polaris() {
                 cd ..
                 return 1
             fi
-            
-            deactivate
-            cd ..
-            
-            # If we get here, installation succeeded with existing directories
-            # Set up env file if needed
-            if [ ! -f "polariscloud/.env" ]; then
-                print_status "Creating .env file..."
-                # Get public IP
-                get_public_ip
-                # Use the global variable
-                public_ip="$DETECTED_PUBLIC_IP"
-                
-                # Get user inputs for SSH configuration
-                cd polariscloud
-                setup_ssh_configuration
-                
-                # Create .env file
-                create_env_file
-                cd ..
-            else
-                print_success "Found existing .env configuration."
-            fi
-            
-            print_success "Polaris installation completed successfully!"
-            
-            # Set the flag to indicate installation is complete
-            POLARIS_INSTALLED=true
-            export POLARIS_INSTALLED
-            
-            # Ask user if they want to start Polaris immediately
-            ask_to_start_polaris
-            
-            return 0
         fi
+        
+        # Setup configuration regardless of whether we just installed or already had a venv
+        # Stay in the polariscloud directory if we're already there, otherwise go there
+        if [ ! "$PWD" = "$(pwd)/polariscloud" ] && [ ! "$PWD" = "$(realpath ./polariscloud)" ]; then
+            cd polariscloud
+        fi
+        
+        # Always create the environment file
+        print_status "Setting up environment configuration..."
+        
+        # Get public IP
+        get_public_ip
+        public_ip="$DETECTED_PUBLIC_IP"
+        
+        # Always get SSH configuration
+        print_status "Setting up SSH configuration..."
+        setup_ssh_configuration
+        
+        # Create .env file
+        print_status "Creating .env file with configuration..."
+        create_env_file
+        
+        # Validate .env file
+        if [ -f ".env" ]; then
+            print_success "Environment file created successfully."
+            
+            # Display configuration
+            echo -e "${YELLOW}Environment Configuration:${NC}"
+            echo -e "${CYAN}HOST:${NC} $public_ip"
+            echo -e "${CYAN}SSH User:${NC} $ssh_user"
+            echo -e "${CYAN}SSH Ports:${NC} $port_start-$port_end"
+            echo -e "${CYAN}Primary SSH Port:${NC} $port_start"
+            
+            # Check if critical variables are set
+            source .env
+            if [ -z "$SSH_PASSWORD" ] && [ "$use_ssh_key" != "true" ]; then
+                print_error "SSH_PASSWORD is not set in .env file."
+                print_status "Creating a default password..."
+                
+                # Generate a random password if none exists
+                default_password="polaris_$(date +%s | sha256sum | base64 | head -c 8)"
+                echo "SSH_PASSWORD=$default_password" >> .env
+                print_warning "Default password created: $default_password"
+                print_warning "Please change this password for security reasons."
+            fi
+        else
+            print_error "Failed to create .env file."
+            print_status "Creating a minimal .env file with defaults..."
+            
+            # Create a minimal .env file with placeholders
+            cat > .env << EOF
+# Polaris Environment Configuration - Default Minimal Setup
+# Values in [brackets] need your attention
+
+# Server Configuration
+HOST=[server_ip]
+API_PORT=8000
+
+# SSH Configuration
+SSH_PORT_RANGE_START=11000
+SSH_PORT_RANGE_END=11010
+SSH_USER=[ssh_user]
+SSH_PASSWORD=polaris_default_password
+SSH_HOST=[ssh_host]
+SSH_PORT=11000
+
+# API Configuration
+SERVER_URL=https://orchestrator-gekh.onrender.com/api/v1
+EOF
+            # Fill in what we know
+            sed -i "s/\[server_ip\]/$public_ip/g" .env
+            sed -i "s/\[ssh_host\]/$public_ip/g" .env
+            sed -i "s/\[ssh_user\]/$(whoami)/g" .env
+            
+            print_warning "Created minimal .env file with default values."
+            print_warning "Default SSH port range: 11000-11010"
+            print_warning "Default password: polaris_default_password"
+            print_warning "Please update these values for security reasons."
+        fi
+        
+        # Return to parent directory if we started there
+        if [ "$PWD" != "$(realpath ..)" ]; then
+            cd ..
+        fi
+        
+        print_success "Polaris installation and configuration completed successfully!"
+        
+        # Set the flag to indicate installation is complete
+        POLARIS_INSTALLED=true
+        export POLARIS_INSTALLED
+        
+        # Ask user if they want to start Polaris immediately
+        ask_to_start_polaris
+        
+        return 0
     fi
     
-    # Setup for fresh installation (polariscloud directory exists but no venv)
-    # or create polariscloud if it doesn't exist
+    # Setup for fresh installation when polariscloud doesn't exist
     if [ ! -d "polariscloud" ]; then
         print_status "Creating polariscloud directory..."
         mkdir -p polariscloud
@@ -1241,16 +1301,76 @@ EOF
     public_ip="$DETECTED_PUBLIC_IP"
     
     # Setup SSH configuration
+    print_status "Setting up SSH configuration..."
     setup_ssh_configuration
     
     # Create .env file
+    print_status "Creating environment file with configuration..."
     create_env_file
+    
+    # Validate .env file
+    if [ -f ".env" ]; then
+        print_success "Environment file created successfully."
+        
+        # Display configuration
+        echo -e "${YELLOW}Environment Configuration:${NC}"
+        echo -e "${CYAN}HOST:${NC} $public_ip"
+        echo -e "${CYAN}SSH User:${NC} $ssh_user"
+        echo -e "${CYAN}SSH Ports:${NC} $port_start-$port_end"
+        echo -e "${CYAN}Primary SSH Port:${NC} $port_start"
+        
+        # Check if critical variables are set
+        source .env
+        if [ -z "$SSH_PASSWORD" ] && [ "$use_ssh_key" != "true" ]; then
+            print_error "SSH_PASSWORD is not set in .env file."
+            print_status "Creating a default password..."
+            
+            # Generate a random password if none exists
+            default_password="polaris_$(date +%s | sha256sum | base64 | head -c 8)"
+            echo "SSH_PASSWORD=$default_password" >> .env
+            print_warning "Default password created: $default_password"
+            print_warning "Please change this password for security reasons."
+        fi
+    else
+        print_error "Failed to create .env file."
+        print_status "Creating a minimal .env file with defaults..."
+        
+        # Create a minimal .env file with placeholders
+        cat > .env << EOF
+# Polaris Environment Configuration - Default Minimal Setup
+# Values in [brackets] need your attention
+
+# Server Configuration
+HOST=[server_ip]
+API_PORT=8000
+
+# SSH Configuration
+SSH_PORT_RANGE_START=11000
+SSH_PORT_RANGE_END=11010
+SSH_USER=[ssh_user]
+SSH_PASSWORD=polaris_default_password
+SSH_HOST=[ssh_host]
+SSH_PORT=11000
+
+# API Configuration
+SERVER_URL=https://orchestrator-gekh.onrender.com/api/v1
+EOF
+        # Fill in what we know
+        sed -i "s/\[server_ip\]/$public_ip/g" .env
+        sed -i "s/\[ssh_host\]/$public_ip/g" .env
+        sed -i "s/\[ssh_user\]/$(whoami)/g" .env
+        
+        print_warning "Created minimal .env file with default values."
+        print_warning "Default SSH port range: 11000-11010"
+        print_warning "Default password: polaris_default_password"
+        print_warning "Please update these values for security reasons."
+    fi
     
     # Deactivate the virtual environment and return to the original directory
     deactivate
     cd ..
     
-    print_success "Polaris installation completed successfully!"
+    print_success "Polaris installation and configuration completed successfully!"
     
     # Set the flag to indicate installation is complete
     POLARIS_INSTALLED=true
@@ -1750,18 +1870,39 @@ troubleshoot_polaris_startup() {
                 # Get port range
                 get_port_range
                 
-                # Create .env file
+                # Create .env file with template approach
                 cat > .env << EOF
-HOST=$public_ip
+# Polaris Environment Configuration
+# Values in [brackets] are placeholders that will be replaced
+
+# Server Configuration
+HOST=[server_ip]
 API_PORT=8000
-SSH_PORT_RANGE_START=$port_start
-SSH_PORT_RANGE_END=$port_end
-SSH_PASSWORD=$ssh_password
-SSH_USER=$ssh_user
-SSH_HOST=$public_ip
-SSH_PORT=$port_start
+
+# SSH Configuration
+SSH_PORT_RANGE_START=[port_start]
+SSH_PORT_RANGE_END=[port_end]
+SSH_USER=[ssh_user]
+SSH_PASSWORD=[ssh_password]
+SSH_HOST=[ssh_host]
+SSH_PORT=[ssh_port]
+
+# API Configuration
 SERVER_URL=https://orchestrator-gekh.onrender.com/api/v1
 EOF
+
+                # Fill in the placeholders
+                sed -i "s/\[server_ip\]/$public_ip/g" .env
+                sed -i "s/\[port_start\]/$port_start/g" .env
+                sed -i "s/\[port_end\]/$port_end/g" .env
+                sed -i "s/\[ssh_user\]/$ssh_user/g" .env
+                sed -i "s/\[ssh_host\]/$public_ip/g" .env
+                sed -i "s/\[ssh_port\]/$port_start/g" .env
+                
+                # Handle password (escape special characters)
+                escaped_password=$(printf '%s\n' "$ssh_password" | sed 's/[\/&]/\\&/g')
+                sed -i "s/\[ssh_password\]/$escaped_password/g" .env
+                
                 print_success "New .env file created."
                 cd ..
             fi
@@ -2059,33 +2200,80 @@ setup_ssh_configuration() {
 
 # Function to create .env file
 create_env_file() {
-    # Check if SSH key authentication is being used
+    print_status "Creating .env file template..."
+    
+    # First create the template with placeholder brackets
+    cat > .env << EOF
+# Polaris Environment Configuration
+# Values in [brackets] are placeholders that will be replaced
+
+# Server Configuration
+HOST=[server_ip]
+API_PORT=8000
+
+# SSH Configuration
+SSH_PORT_RANGE_START=[port_start]
+SSH_PORT_RANGE_END=[port_end]
+SSH_USER=[ssh_user]
+SSH_PASSWORD=[ssh_password]
+SSH_HOST=[ssh_host]
+SSH_PORT=[ssh_port]
+
+# API Configuration
+SERVER_URL=https://orchestrator-gekh.onrender.com/api/v1
+EOF
+
+    # Now replace the placeholders with actual values
+    print_status "Filling in configuration values..."
+    
+    # Replace server IP
+    sed -i "s/\[server_ip\]/$public_ip/g" .env
+    
+    # Replace SSH config
+    sed -i "s/\[port_start\]/$port_start/g" .env
+    sed -i "s/\[port_end\]/$port_end/g" .env
+    sed -i "s/\[ssh_user\]/$ssh_user/g" .env
+    sed -i "s/\[ssh_host\]/$public_ip/g" .env
+    sed -i "s/\[ssh_port\]/$port_start/g" .env
+    
+    # Replace SSH password or use key authentication
     if [ "$use_ssh_key" = true ]; then
-        # Create .env file without SSH_PASSWORD
-        cat > .env << EOF
-HOST=$public_ip
-API_PORT=8000
-SSH_PORT_RANGE_START=$port_start
-SSH_PORT_RANGE_END=$port_end
-SSH_USER=$ssh_user
-SSH_HOST=$public_ip
-SSH_PORT=$port_start
-SERVER_URL=https://orchestrator-gekh.onrender.com/api/v1
-USE_SSH_KEY=true
-EOF
+        # Remove the SSH_PASSWORD line and add USE_SSH_KEY=true
+        sed -i "/SSH_PASSWORD=/d" .env
+        echo "USE_SSH_KEY=true" >> .env
+        print_success "Configured for SSH key authentication"
     else
-        # Create .env file with SSH_PASSWORD
-        cat > .env << EOF
-HOST=$public_ip
-API_PORT=8000
-SSH_PORT_RANGE_START=$port_start
-SSH_PORT_RANGE_END=$port_end
-SSH_PASSWORD=$ssh_password
-SSH_USER=$ssh_user
-SSH_HOST=$public_ip
-SSH_PORT=$port_start
-SERVER_URL=https://orchestrator-gekh.onrender.com/api/v1
-EOF
+        # Replace the password placeholder
+        # Escape any special characters in the password
+        escaped_password=$(printf '%s\n' "$ssh_password" | sed 's/[\/&]/\\&/g')
+        sed -i "s/\[ssh_password\]/$escaped_password/g" .env
+    fi
+    
+    # Display the final configuration
+    print_success "Environment file created with your configuration"
+    echo
+    echo -e "${YELLOW}Your Polaris configuration:${NC}"
+    echo -e "${CYAN}HOST:${NC} $public_ip"
+    echo -e "${CYAN}SSH User:${NC} $ssh_user"
+    echo -e "${CYAN}SSH Ports:${NC} $port_start-$port_end"
+    echo -e "${CYAN}Primary SSH Port:${NC} $port_start"
+    
+    # Final check - ensure no placeholders remain
+    if grep -q "\[.*\]" .env; then
+        print_warning "Some configuration values could not be filled:"
+        grep "\[.*\]" .env
+        
+        print_status "Setting default values for any remaining placeholders..."
+        sed -i "s/\[ssh_password\]/polaris_default_password/g" .env
+        
+        # Check again after fixes
+        if grep -q "\[.*\]" .env; then
+            print_warning "Please review your .env file and manually update any remaining placeholders."
+        else
+            print_success "All placeholders have been filled with default values."
+        fi
+    else
+        print_success "All configuration values successfully applied!"
     fi
 }
 
