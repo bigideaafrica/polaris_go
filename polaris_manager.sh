@@ -47,6 +47,80 @@ print_warning() {
     echo -e "${YELLOW}[!]${NC} $1"
 }
 
+# Function to check and fix common issues that might prevent Polaris from running
+check_and_fix_common_issues() {
+    print_status "Performing pre-flight checks for Polaris..."
+    
+    # Get the script directory
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    print_status "Script is running from: $SCRIPT_DIR"
+    
+    # Check for polaris alias conflicts that might interfere with the command
+    if grep -q "alias polaris=" ~/.bashrc 2>/dev/null; then
+        print_warning "Found potentially conflicting 'polaris' alias in ~/.bashrc"
+        echo -e "${YELLOW}This may redirect polaris commands to another program.${NC}"
+        
+        # Check what the alias is set to
+        local alias_value=$(grep "alias polaris=" ~/.bashrc | sed 's/alias polaris=\(.*\)/\1/')
+        print_warning "Current alias: polaris=$alias_value"
+        
+        read -p "Would you like to temporarily disable this alias for this session? (y/n): " disable_alias
+        if [[ $disable_alias =~ ^[Yy]$ ]]; then
+            print_status "Temporarily disabling polaris alias..."
+            unalias polaris 2>/dev/null || true
+            print_success "Alias disabled for this session only."
+        fi
+    fi
+    
+    # Check if polariscloud directory exists in expected location
+    if [ -d "$SCRIPT_DIR/polariscloud" ]; then
+        print_success "Found polariscloud directory at: $SCRIPT_DIR/polariscloud"
+        
+        # Check for virtual environment
+        if [ -d "$SCRIPT_DIR/polariscloud/venv" ]; then
+            print_success "Found virtual environment at: $SCRIPT_DIR/polariscloud/venv"
+            
+            if [ -f "$SCRIPT_DIR/polariscloud/venv/bin/activate" ]; then
+                print_success "Found activation script: $SCRIPT_DIR/polariscloud/venv/bin/activate"
+            else
+                print_warning "Missing activation script in virtual environment!"
+            fi
+        else
+            print_warning "No virtual environment found at: $SCRIPT_DIR/polariscloud/venv"
+            print_warning "Installation may be incomplete or corrupted."
+        fi
+        
+        # Check for .env file
+        if [ -f "$SCRIPT_DIR/polariscloud/.env" ]; then
+            print_success "Found .env configuration file"
+            # Check if SSH_PASSWORD is set
+            if grep -q "SSH_PASSWORD=" "$SCRIPT_DIR/polariscloud/.env"; then
+                print_success "SSH_PASSWORD is configured in .env file"
+            else
+                print_warning "SSH_PASSWORD not found in .env file!"
+                if grep -q "USE_SSH_KEY=true" "$SCRIPT_DIR/polariscloud/.env"; then
+                    print_success "Using SSH key authentication instead of password"
+                else
+                    print_warning "Neither SSH_PASSWORD nor USE_SSH_KEY is set. This may cause issues."
+                fi
+            fi
+        else
+            print_warning "No .env configuration file found!"
+            print_warning "Polaris may not function correctly without proper configuration."
+        fi
+        
+        # Check if polaris_run script exists and is executable
+        if [ -f "$SCRIPT_DIR/polariscloud/polaris_run" ]; then
+            print_success "Found polaris_run script at: $SCRIPT_DIR/polariscloud/polaris_run"
+        else
+            print_warning "polaris_run script not found!"
+        fi
+    else
+        print_warning "polariscloud directory not found at: $SCRIPT_DIR/polariscloud"
+        print_warning "Polaris may not function correctly without proper configuration."
+    fi
+}
+
 # Function to detect public IP and ask for confirmation
 get_public_ip() {
     print_status "Detecting your public IP address..."
@@ -1142,6 +1216,79 @@ install_polaris() {
                 print_warning "Could not find polaris or pcli command in PATH."
                 print_status "Creating runner script for Polaris..."
             fi
+        else
+            # ADDED THIS ELSE BRANCH - Handle case where polariscloud exists but no venv
+            print_status "Directory exists but no virtual environment found."
+            print_status "Creating new virtual environment..."
+            
+            # Change to polariscloud directory
+            cd polariscloud
+            
+            # Create virtual environment
+            print_status "Creating Python virtual environment..."
+            python3 -m venv venv
+            check_command "Failed to create virtual environment" 1
+            
+            # Activate the virtual environment
+            print_status "Activating virtual environment..."
+            source "$polaris_dir/venv/bin/activate"
+            check_command "Failed to activate virtual environment" 1
+            
+            # Upgrade pip
+            print_status "Upgrading pip..."
+            pip install --upgrade pip
+            check_command "Failed to upgrade pip" 0
+            
+            # Check if requirements.txt exists
+            if [ ! -f "requirements.txt" ]; then
+                print_warning "requirements.txt not found!"
+                print_status "Creating a basic requirements.txt file..."
+                cat > requirements.txt << EOF
+click
+tabulate
+GitPython
+click-spinner
+rich
+loguru
+inquirer
+requests
+xlsxwriter
+pyyaml
+psutil
+python-dotenv
+pid
+EOF
+            fi
+            
+            # Install bittensor and related packages first
+            print_status "Installing Bittensor and related packages..."
+            pip install bittensor
+            check_command "Failed to install bittensor" 0
+            
+            pip install bittensor-cli
+            check_command "Failed to install bittensor-cli" 0
+            
+            pip install communex==0.1.36.4
+            check_command "Failed to install communex" 0
+            
+            # Install requirements
+            print_status "Installing Python requirements..."
+            pip install -r requirements.txt
+            check_command "Failed to install requirements" 0
+            
+            # Install Polaris in development mode
+            print_status "Installing Polaris in development mode..."
+            pip install -e .
+            check_command "Failed to install Polaris" 0
+            
+            # Verify polaris command is available
+            if command -v polaris &>/dev/null || command -v pcli &>/dev/null; then
+                polaris_path=$(which polaris 2>/dev/null || which pcli 2>/dev/null)
+                print_success "Polaris command successfully installed at: $polaris_path"
+            else
+                print_warning "Could not find polaris or pcli command in PATH."
+                print_status "Creating runner script for Polaris..."
+            fi
         fi
         
         # Setup configuration regardless of whether we just installed or already had a venv
@@ -1158,31 +1305,68 @@ install_polaris() {
 # polaris_run - Direct runner for Polaris commands
 # This script activates the virtual environment and runs polaris with any arguments
 
-# Get the directory of this script (works even if script is symlinked)
+# Get the directory of this script (works even with symlinks)
 SCRIPT_DIR="\$(cd "\$(dirname "\$(readlink -f "\${BASH_SOURCE[0]}")")" && pwd)"
+echo "Running Polaris from directory: \$SCRIPT_DIR"
 
 # Ensure we're in the polariscloud directory
 cd "\$SCRIPT_DIR"
 
+# Check if virtual environment exists
+if [ ! -d "venv" ] || [ ! -f "venv/bin/activate" ]; then
+    echo "Error: Virtual environment not found at \$SCRIPT_DIR/venv"
+    echo "Please make sure Polaris is properly installed."
+    exit 1
+fi
+
 # Activate the virtual environment
+echo "Activating virtual environment at: \$SCRIPT_DIR/venv"
 source "\$SCRIPT_DIR/venv/bin/activate"
+
+# Check if activation was successful
+if [ -z "\$VIRTUAL_ENV" ]; then
+    echo "Error: Failed to activate virtual environment."
+    exit 1
+fi
+
+echo "Successfully activated the virtual environment"
+echo "Python interpreter: \$(command -v python3)"
 
 # Check if polaris command exists in PATH or try alternatives
 if command -v polaris &>/dev/null; then
+    echo "Found polaris command: \$(command -v polaris)"
     polaris "\$@"
 elif command -v pcli &>/dev/null; then
+    echo "Found pcli command: \$(command -v pcli)"
     pcli "\$@"
 elif [ -f "\$SCRIPT_DIR/polaris" ] && [ ! -L "\$SCRIPT_DIR/polaris" ]; then
     # If polaris exists and is not a symlink (to avoid infinite recursion)
+    echo "Using local polaris script at: \$SCRIPT_DIR/polaris"
     "\$SCRIPT_DIR/polaris" "\$@"
+elif [ -f "\$SCRIPT_DIR/polaris/__main__.py" ]; then
+    # Try running it as a module if it exists
+    echo "Running polaris module directly with Python"
+    python3 -m polaris "\$@"
+elif [ -f "\$SCRIPT_DIR/main.py" ]; then
+    # Try running main.py directly
+    echo "Running main.py directly with Python"
+    python3 "\$SCRIPT_DIR/main.py" "\$@"
 else
     echo "Error: Could not find polaris or pcli command."
+    echo "Available commands in PATH: \$(which python3)"
+    echo "Contents of \$SCRIPT_DIR/venv/bin:"
+    ls -la "\$SCRIPT_DIR/venv/bin"
     echo "Please ensure Polaris is properly installed."
     exit 1
 fi
 
+RESULT=\$?
+
 # Deactivate the virtual environment when done
-deactivate
+echo "Deactivating virtual environment"
+deactivate 2>/dev/null || true
+
+exit \$RESULT
 EOF
 
         chmod +x polaris_run
@@ -1400,31 +1584,68 @@ EOF
 # polaris_run - Direct runner for Polaris commands
 # This script activates the virtual environment and runs polaris with any arguments
 
-# Get the directory of this script (works even if script is symlinked)
+# Get the directory of this script (works even with symlinks)
 SCRIPT_DIR="\$(cd "\$(dirname "\$(readlink -f "\${BASH_SOURCE[0]}")")" && pwd)"
+echo "Running Polaris from directory: \$SCRIPT_DIR"
 
 # Ensure we're in the polariscloud directory
 cd "\$SCRIPT_DIR"
 
+# Check if virtual environment exists
+if [ ! -d "venv" ] || [ ! -f "venv/bin/activate" ]; then
+    echo "Error: Virtual environment not found at \$SCRIPT_DIR/venv"
+    echo "Please make sure Polaris is properly installed."
+    exit 1
+fi
+
 # Activate the virtual environment
+echo "Activating virtual environment at: \$SCRIPT_DIR/venv"
 source "\$SCRIPT_DIR/venv/bin/activate"
+
+# Check if activation was successful
+if [ -z "\$VIRTUAL_ENV" ]; then
+    echo "Error: Failed to activate virtual environment."
+    exit 1
+fi
+
+echo "Successfully activated the virtual environment"
+echo "Python interpreter: \$(command -v python3)"
 
 # Check if polaris command exists in PATH or try alternatives
 if command -v polaris &>/dev/null; then
+    echo "Found polaris command: \$(command -v polaris)"
     polaris "\$@"
 elif command -v pcli &>/dev/null; then
+    echo "Found pcli command: \$(command -v pcli)"
     pcli "\$@"
 elif [ -f "\$SCRIPT_DIR/polaris" ] && [ ! -L "\$SCRIPT_DIR/polaris" ]; then
     # If polaris exists and is not a symlink (to avoid infinite recursion)
+    echo "Using local polaris script at: \$SCRIPT_DIR/polaris"
     "\$SCRIPT_DIR/polaris" "\$@"
+elif [ -f "\$SCRIPT_DIR/polaris/__main__.py" ]; then
+    # Try running it as a module if it exists
+    echo "Running polaris module directly with Python"
+    python3 -m polaris "\$@"
+elif [ -f "\$SCRIPT_DIR/main.py" ]; then
+    # Try running main.py directly
+    echo "Running main.py directly with Python"
+    python3 "\$SCRIPT_DIR/main.py" "\$@"
 else
     echo "Error: Could not find polaris or pcli command."
+    echo "Available commands in PATH: \$(which python3)"
+    echo "Contents of \$SCRIPT_DIR/venv/bin:"
+    ls -la "\$SCRIPT_DIR/venv/bin"
     echo "Please ensure Polaris is properly installed."
     exit 1
 fi
 
+RESULT=\$?
+
 # Deactivate the virtual environment when done
-deactivate
+echo "Deactivating virtual environment"
+deactivate 2>/dev/null || true
+
+exit \$RESULT
 EOF
     chmod +x polaris_run
     
@@ -1682,6 +1903,9 @@ EOF
 
 # Function to ask user if they want to start Polaris
 ask_to_start_polaris() {
+    # Get absolute path to polariscloud directory
+    local polaris_dir=$(realpath "$(pwd)/polariscloud")
+    
     # Show clean success message and available commands
     clear
     echo -e "${GREEN}─────────────────────────────────────────────────────${NC}"
@@ -1700,42 +1924,125 @@ ask_to_start_polaris() {
     echo -e "${CYAN}Would you like to start Polaris now? (y/n)${NC}"
     read -p "${CYAN}> ${NC}" start_polaris_now
     if [[ $start_polaris_now =~ ^[Yy]$ ]]; then
-        print_status "Starting Polaris services..."
-        cd polariscloud
-        source venv/bin/activate
-        
-        # Try both command names
-        if command -v polaris &>/dev/null; then
-        polaris start
-            start_success=$?
-        elif command -v pcli &>/dev/null; then
-            pcli start
-            start_success=$?
-        else
-            print_error "Neither polaris nor pcli command found in PATH"
-            start_success=1
+        # First check that polariscloud directory exists
+        if [ ! -d "$polaris_dir" ]; then
+            print_error "Cannot find polariscloud directory at: $polaris_dir"
+            print_warning "Please make sure Polaris is properly installed."
+            read -p "Press Enter to continue to main menu..."
+            return 1
         fi
         
-        if [ $start_success -eq 0 ]; then
-            print_success "Polaris services started successfully!"
-            echo
-            print_status "Showing current status:"
-            if command -v polaris &>/dev/null; then
-            polaris status
-            elif command -v pcli &>/dev/null; then
-                pcli status
+        # Navigate to polariscloud directory
+        cd "$polaris_dir"
+        print_status "Starting Polaris services from: $(pwd)"
+        
+        # Check if virtual environment exists
+        if [ ! -d "venv" ] || [ ! -f "venv/bin/activate" ]; then
+            print_error "Virtual environment not found at $(pwd)/venv"
+            print_warning "Creating a new virtual environment..."
+            
+            # Try to create a new virtual environment
+            python3 -m venv venv
+            if [ ! -f "venv/bin/activate" ]; then
+                print_error "Failed to create virtual environment. Please reinstall Polaris."
+                cd - &>/dev/null
+                read -p "Press Enter to continue to main menu..."
+                return 1
             fi
-            echo
-            read -p "Press Enter to enter the Polaris environment..."
-            # Start interactive shell in the environment
-            $SHELL
-        else
-            print_error "Failed to start Polaris services. Please check the logs."
         fi
         
-        # When shell exits, deactivate the environment
-        deactivate
-        cd ..
+        # Use polaris_run script if available (most reliable method)
+        if [ -f "polaris_run" ] && [ -x "polaris_run" ]; then
+            print_status "Using polaris_run script to start services..."
+            ./polaris_run start
+            start_success=$?
+            
+            if [ $start_success -eq 0 ]; then
+                print_success "Polaris services started successfully with polaris_run!"
+                echo
+                print_status "Showing current status:"
+                ./polaris_run status
+                echo
+            else
+                print_error "Failed to start Polaris services with polaris_run. Trying alternative methods..."
+            fi
+        else
+            # Activate the virtual environment with proper error handling
+            print_status "Activating virtual environment..."
+            if [ -f "venv/bin/activate" ]; then
+                source "./venv/bin/activate"
+                
+                # Check if activation was successful 
+                if [ -z "$VIRTUAL_ENV" ]; then
+                    print_error "Failed to activate virtual environment."
+                    cd - &>/dev/null
+                    read -p "Press Enter to continue to main menu..."
+                    return 1
+                fi
+                
+                print_success "Virtual environment activated."
+                
+                # Try both command names
+                start_success=1
+                if command -v polaris &>/dev/null; then
+                    print_status "Found polaris command, starting services..."
+                    polaris start
+                    start_success=$?
+                elif command -v pcli &>/dev/null; then
+                    print_status "Found pcli command, starting services..."
+                    pcli start
+                    start_success=$?
+                else
+                    print_error "Neither polaris nor pcli command found in PATH"
+                    print_error "Available commands in PATH: $(which python3)"
+                    print_status "Contents of venv/bin:"
+                    ls -la venv/bin
+                    start_success=1
+                fi
+                
+                if [ $start_success -eq 0 ]; then
+                    print_success "Polaris services started successfully!"
+                    echo
+                    print_status "Showing current status:"
+                    if command -v polaris &>/dev/null; then
+                        polaris status
+                    elif command -v pcli &>/dev/null; then
+                        pcli status
+                    fi
+                    echo
+                    read -p "Press Enter to enter the Polaris environment..."
+                    # Start interactive shell in the environment
+                    $SHELL
+                else
+                    print_error "Failed to start Polaris services. Please check the logs."
+                    
+                    # Attempt to run directly with python as a last resort
+                    print_status "Attempting to start directly with Python as a fallback..."
+                    
+                    if [ -f "main.py" ]; then
+                        print_status "Found main.py, attempting to run..."
+                        python3 main.py start
+                    elif [ -f "polaris/__main__.py" ]; then
+                        print_status "Found polaris module, attempting to run..."
+                        python3 -m polaris start
+                    else
+                        print_error "Could not find Python entry points to run Polaris."
+                    fi
+                fi
+                
+                # When shell exits, deactivate the environment properly
+                if [ -n "$VIRTUAL_ENV" ]; then
+                    print_status "Deactivating virtual environment..."
+                    deactivate || true  # Don't fail if deactivate isn't defined
+                fi
+            else
+                print_error "Activation script not found at: $(pwd)/venv/bin/activate"
+                print_warning "Polaris installation appears to be incomplete."
+            fi
+        fi
+        
+        # Return to the original directory
+        cd - &>/dev/null
     fi
     
     echo
