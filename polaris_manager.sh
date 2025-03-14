@@ -388,6 +388,15 @@ check_prerequisites() {
         missing_packages+=" python3"
     fi
     
+    # Check for python3-venv on Debian/Ubuntu systems
+    if [ -f /etc/debian_version ]; then
+        if ! dpkg -l | grep -q python3-venv; then
+            print_warning "python3-venv is not installed (required for virtual environments)"
+            missing_prereqs=true
+            missing_packages+=" python3-venv"
+        fi
+    fi
+    
     if [ "$missing_prereqs" = true ]; then
         echo
         print_warning "Missing prerequisites: ${missing_packages}"
@@ -1224,6 +1233,26 @@ install_polaris() {
             # Change to polariscloud directory
             cd polariscloud
             
+            # Ensure python3-venv is installed on Ubuntu/Debian systems
+            if [ -f /etc/debian_version ]; then
+                # Check if python3-venv is installed
+                if ! dpkg -l | grep -q python3-venv; then
+                    print_status "Installing python3-venv package required for virtual environments..."
+                    sudo apt-get update
+                    # Determine Python version and install the appropriate venv package
+                    python_version=$(python3 --version | cut -d' ' -f2 | cut -d'.' -f1,2)
+                    if apt-cache search python${python_version}-venv | grep -q python${python_version}-venv; then
+                        sudo apt-get install -y python${python_version}-venv
+                    else
+                        # Fallback to generic python3-venv if specific version not available
+                        sudo apt-get install -y python3-venv
+                    fi
+                    print_success "Python virtual environment package installed"
+                else
+                    print_success "Python virtual environment package already installed"
+                fi
+            fi
+            
             # Create virtual environment
             print_status "Creating Python virtual environment..."
             python3 -m venv venv
@@ -1520,9 +1549,29 @@ EOF
                 cd polariscloud
     print_status "Setting up Polaris in $(pwd)..."
     
+    # Ensure python3-venv is installed on Ubuntu/Debian systems
+    if [ -f /etc/debian_version ]; then
+        # Check if python3-venv is installed
+        if ! dpkg -l | grep -q python3-venv; then
+            print_status "Installing python3-venv package required for virtual environments..."
+            sudo apt-get update
+            # Determine Python version and install the appropriate venv package
+            python_version=$(python3 --version | cut -d' ' -f2 | cut -d'.' -f1,2)
+            if apt-cache search python${python_version}-venv | grep -q python${python_version}-venv; then
+                sudo apt-get install -y python${python_version}-venv
+            else
+                # Fallback to generic python3-venv if specific version not available
+                sudo apt-get install -y python3-venv
+            fi
+            print_success "Python virtual environment package installed"
+        else
+            print_success "Python virtual environment package already installed"
+        fi
+    fi
+    
     # Create virtual environment
     print_status "Creating virtual environment..."
-                python3 -m venv venv
+    python3 -m venv venv
     check_command "Failed to create virtual environment" 1
     
     # Activate the virtual environment
@@ -1531,7 +1580,7 @@ EOF
     
     # Upgrade pip
     print_status "Upgrading pip..."
-                pip install --upgrade pip
+    pip install --upgrade pip
     check_command "Failed to upgrade pip" 0
     
     # Check if requirements.txt exists
@@ -1568,7 +1617,7 @@ EOF
     
     # Install requirements
     print_status "Installing Python requirements..."
-                pip install -r requirements.txt
+    pip install -r requirements.txt
     check_command "Failed to install requirements" 0
     
     # Install Polaris in development mode
