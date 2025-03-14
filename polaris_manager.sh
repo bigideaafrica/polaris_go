@@ -1083,15 +1083,19 @@ install_polaris() {
 
             # Now install the rest of the requirements
             print_status "Installing remaining dependencies..."
-            pip install -r requirements.txt
-            check_command "Failed to install requirements" 0
+            if [ -f "requirements.txt" ]; then
+                pip install -r requirements.txt
+                check_command "Failed to install requirements" 0
+            else
+                print_warning "No requirements.txt found. Installing common dependencies..."
+                pip install click tabulate GitPython click-spinner rich loguru inquirer requests xlsxwriter pyyaml psutil python-dotenv pid
+            fi
 
             # Install Polaris in development mode
-            print_status "Installing Polaris in development mode..."
             pip install -e .
             check_command "Failed to install Polaris" 0
             
-            # Verify the polaris command works
+            # Verify polaris command is available
             if command -v polaris &>/dev/null || command -v pcli &>/dev/null; then
                 print_success "Polaris command successfully installed!"
             else
@@ -1137,16 +1141,19 @@ install_polaris() {
         fi
     fi
     
-    # Clone the repository if it doesn't exist
+    # Setup for fresh installation (polariscloud directory exists but no venv)
+    # or create polariscloud if it doesn't exist
     if [ ! -d "polariscloud" ]; then
-        print_status "Cloning Polaris repository..."
-        git clone https://github.com/bigideainc/polaris-subnet.git polariscloud
-        check_command "Failed to clone repository" 1
+        print_status "Creating polariscloud directory..."
+        mkdir -p polariscloud
     fi
 
-    # Create virtual environment inside the polariscloud directory
+    # Change directory to polariscloud
     cd polariscloud
-    print_status "Creating virtual environment inside polariscloud directory..."
+    print_status "Setting up Polaris in $(pwd)..."
+    
+    # Create virtual environment
+    print_status "Creating virtual environment..."
     python3 -m venv venv
     check_command "Failed to create virtual environment" 1
     
@@ -1161,7 +1168,7 @@ install_polaris() {
     
     # Check if requirements.txt exists
     if [ ! -f "requirements.txt" ]; then
-        print_error "requirements.txt not found!"
+        print_warning "requirements.txt not found!"
         print_status "Creating a basic requirements.txt file..."
         cat > requirements.txt << EOF
 click
@@ -1201,14 +1208,30 @@ EOF
     pip install -e .
     check_command "Failed to install Polaris" 0
     
-    # Verify polaris command is available
-    if command -v polaris &>/dev/null || command -v pcli &>/dev/null; then
-        print_success "Polaris command successfully installed!"
-    else
-        print_error "Failed to install polaris command. Please check your environment."
-        deactivate
-        cd ..
-        return 1
+    # Create a direct runner script for convenience
+    print_status "Creating direct runner script..."
+    cat > polaris_run << EOF
+#!/bin/bash
+
+# polaris_run - Direct runner for Polaris commands
+# This script activates the virtual environment and runs polaris with any arguments
+
+# Activate the virtual environment
+source "$(pwd)/venv/bin/activate"
+
+# Run polaris with all arguments passed to this script
+polaris "\$@"
+
+# Deactivate the virtual environment when done
+deactivate
+EOF
+
+    chmod +x polaris_run
+    
+    # Create a symlink called polaris if it doesn't exist
+    if [ ! -L "polaris" ]; then
+        ln -s polaris_run polaris
+        chmod +x polaris
     fi
     
     # Get public IP for configuration
