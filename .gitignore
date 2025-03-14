@@ -7,6 +7,8 @@
 # Specific JSON files with full paths
 /home/tang/polaris_go-1/polariscloud/system_info.json
 /home/tang/polaris_go-1/polariscloud/user_info.json
+polariscloud/system_info.json
+polariscloud/user_info.json
 
 # Python-specific files
 __pycache__/

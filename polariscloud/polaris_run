@@ -1,0 +1,16 @@
+#!/bin/bash
+
+# Get the directory of this script
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+# Change to the polariscloud directory to ensure proper environment loading
+cd "$SCRIPT_DIR"
+
+# Activate the virtual environment
+source "$SCRIPT_DIR/venv/bin/activate"
+
+# Run the CLI module directly with all passed arguments
+python -m polaris_cli.cli "$@"
+
+# Deactivate the virtual environment
+deactivate 
