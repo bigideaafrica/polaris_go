@@ -489,7 +489,7 @@ def format_network_info(username: str, password: str) -> dict:
         "ssh": f"ssh://{ssh_user}@{os.environ.get('SSH_HOST')}:{os.environ.get('SSH_PORT')}",
         "open_ports": ["22"],
         "password": str(password),
-        "username": str(username)
+        "username": str(ssh_user)
     }
     
 # def format_network_info(username: str, password: str) -> dict:
