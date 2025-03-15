@@ -1033,34 +1033,33 @@ install_python_requirements() {
         python_major=$(echo $python_version | cut -d. -f1)
         python_minor=$(echo $python_version | cut -d. -f2)
         
-        # Check if Python version is less than 3.10
-        if [ "$python_major" -lt 3 ] || ([ "$python_major" -eq 3 ] && [ "$python_minor" -lt 10 ]); then
-            print_warning "Python version $python_version is less than 3.10 (required for communex)"
-            
-            # Check if Python 3.10 is already installed
-            if brew list python@3.10 &>/dev/null; then
-                print_success "Python 3.10 is already installed via Homebrew"
-            else
-                # Install Python 3.10
-                print_status "Installing Python 3.10 via Homebrew..."
-                brew install python@3.10
-                
-                # Make Python 3.10 the default
-                print_status "Setting Python 3.10 as the default Python version..."
-                brew link --force python@3.10
-            fi
-            
-            # Verify Python installation and version after setting up Python 3.10
-            if command_exists python3; then
-                new_python_version=$(python3 --version 2>&1 | cut -d' ' -f2)
-                print_success "Python $new_python_version installed"
-            else
-                print_error "Python installation failed. Please install manually:"
-                print_error "brew install python@3.10"
-                exit 1
-            fi
+        # Install Python 3.10 without making it the system default
+        if ! brew list python@3.10 &>/dev/null; then
+            print_status "Installing Python 3.10 via Homebrew (for virtual environment only)..."
+            brew install python@3.10
         else
-            print_success "Python version $python_version is 3.10 or higher (compatible with communex)"
+            print_success "Python 3.10 is already installed via Homebrew"
+        fi
+        
+        # Get the path to Python 3.10 from Homebrew
+        python310_path=$(brew --prefix python@3.10)/bin/python3
+        
+        # Confirm Python 3.10 is available (but don't make it system default)
+        if [ ! -f "$python310_path" ]; then
+            print_error "Could not find Python 3.10 at expected location: $python310_path"
+            print_error "Please install manually: brew install python@3.10"
+            exit 1
+        else
+            print_success "Python 3.10 is available at: $python310_path"
+            print_status "System Python remains: $(python3 --version)"
+        fi
+
+        # No need to exit if system Python is < 3.10 since we'll use Python 3.10 for our virtual environment
+        if [ "$python_major" -lt 3 ] || ([ "$python_major" -eq 3 ] && [ "$python_minor" -lt 10 ]); then
+            print_warning "System Python version $python_version is less than 3.10"
+            print_warning "We'll use Python 3.10 for the virtual environment instead"
+        else
+            print_success "System Python version $python_version is 3.10 or higher (compatible with communex)"
         fi
 
         # Install XCode Command Line Tools if needed
@@ -1242,13 +1241,22 @@ install_polaris() {
             python_major=$(echo $python_version | cut -d. -f1)
             python_minor=$(echo $python_version | cut -d. -f2)
             
+            # In MacOS, we've created a venv with Python 3.10+, so this should always pass
+            # For other OS, we still need to check
             if [ "$python_major" -lt 3 ] || ([ "$python_major" -eq 3 ] && [ "$python_minor" -lt 10 ]); then
-                print_error "communex requires Python 3.10 or higher. Currently using Python $python_version"
-                print_error "Please upgrade your Python version and try again."
-                if is_macos; then
-                    print_error "Run: brew install python@3.10 && brew link --force python@3.10"
+                if is_macos && [ -n "$VIRTUAL_ENV" ]; then
+                    # We're in a virtual environment on MacOS, which should be using Python 3.10
+                    print_warning "Virtual environment Python version is $python_version (less than 3.10)"
+                    print_warning "This may cause issues with communex. Attempting installation anyway..."
+                else
+                    # Non-macOS or not in a virtual environment
+                    print_error "communex requires Python 3.10 or higher. Currently using Python $python_version"
+                    print_error "Please upgrade your Python version and try again."
+                    if is_macos; then
+                        print_error "Run: brew install python@3.10"
+                    fi
+                    exit 1
                 fi
-                exit 1
             fi
             
             print_status "Installing communex (using Python $python_version)..."
@@ -1307,8 +1315,17 @@ install_polaris() {
             fi
             
             # Create virtual environment
-            print_status "Creating Python virtual environment..."
-            python3 -m venv venv
+            print_status "Creating virtual environment..."
+            
+            if is_macos; then
+                # On MacOS, explicitly use Python 3.10 for the virtual environment
+                print_status "Using Python 3.10 specifically for the virtual environment..."
+                "$python310_path" -m venv venv
+            else
+                # On other systems, use the default Python
+                python3 -m venv venv
+            fi
+            
             check_command "Failed to create virtual environment" 1
             
             # Activate the virtual environment
@@ -1369,13 +1386,22 @@ EOF
             python_major=$(echo $python_version | cut -d. -f1)
             python_minor=$(echo $python_version | cut -d. -f2)
             
+            # In MacOS, we've created a venv with Python 3.10+, so this should always pass
+            # For other OS, we still need to check
             if [ "$python_major" -lt 3 ] || ([ "$python_major" -eq 3 ] && [ "$python_minor" -lt 10 ]); then
-                print_error "communex requires Python 3.10 or higher. Currently using Python $python_version"
-                print_error "Please upgrade your Python version and try again."
-                if is_macos; then
-                    print_error "Run: brew install python@3.10 && brew link --force python@3.10"
+                if is_macos && [ -n "$VIRTUAL_ENV" ]; then
+                    # We're in a virtual environment on MacOS, which should be using Python 3.10
+                    print_warning "Virtual environment Python version is $python_version (less than 3.10)"
+                    print_warning "This may cause issues with communex. Attempting installation anyway..."
+                else
+                    # Non-macOS or not in a virtual environment
+                    print_error "communex requires Python 3.10 or higher. Currently using Python $python_version"
+                    print_error "Please upgrade your Python version and try again."
+                    if is_macos; then
+                        print_error "Run: brew install python@3.10"
+                    fi
+                    exit 1
                 fi
-                exit 1
             fi
             
             print_status "Installing communex (using Python $python_version)..."
@@ -1653,10 +1679,20 @@ EOF
     
     # Create virtual environment
     print_status "Creating virtual environment..."
-    python3 -m venv venv
+    
+    if is_macos; then
+        # On MacOS, explicitly use Python 3.10 for the virtual environment
+        print_status "Using Python 3.10 specifically for the virtual environment..."
+        "$python310_path" -m venv venv
+    else
+        # On other systems, use the default Python
+        python3 -m venv venv
+    fi
+    
     check_command "Failed to create virtual environment" 1
     
     # Activate the virtual environment
+    print_status "Activating virtual environment..."
     source "$polaris_dir/venv/bin/activate"
     check_command "Failed to activate virtual environment" 1
     
@@ -1714,13 +1750,22 @@ EOF
     python_major=$(echo $python_version | cut -d. -f1)
     python_minor=$(echo $python_version | cut -d. -f2)
     
+    # In MacOS, we've created a venv with Python 3.10+, so this should always pass
+    # For other OS, we still need to check
     if [ "$python_major" -lt 3 ] || ([ "$python_major" -eq 3 ] && [ "$python_minor" -lt 10 ]); then
-        print_error "communex requires Python 3.10 or higher. Currently using Python $python_version"
-        print_error "Please upgrade your Python version and try again."
-        if is_macos; then
-            print_error "Run: brew install python@3.10 && brew link --force python@3.10"
+        if is_macos && [ -n "$VIRTUAL_ENV" ]; then
+            # We're in a virtual environment on MacOS, which should be using Python 3.10
+            print_warning "Virtual environment Python version is $python_version (less than 3.10)"
+            print_warning "This may cause issues with communex. Attempting installation anyway..."
+        else
+            # Non-macOS or not in a virtual environment
+            print_error "communex requires Python 3.10 or higher. Currently using Python $python_version"
+            print_error "Please upgrade your Python version and try again."
+            if is_macos; then
+                print_error "Run: brew install python@3.10"
+            fi
+            exit 1
         fi
-        exit 1
     fi
     
     print_status "Installing communex (using Python $python_version)..."
@@ -2103,7 +2148,14 @@ ask_to_start_polaris() {
             print_warning "Creating a new virtual environment..."
             
             # Try to create a new virtual environment
-            python3 -m venv venv
+            if is_macos && [ -n "$python310_path" ] && [ -f "$python310_path" ]; then
+                # On MacOS, use Python 3.10 if available
+                print_status "Using Python 3.10 for virtual environment..."
+                "$python310_path" -m venv venv
+            else
+                # Otherwise use the default Python
+                python3 -m venv venv
+            fi
             if [ ! -f "venv/bin/activate" ]; then
                 print_error "Failed to create virtual environment. Please reinstall Polaris."
                 cd - &>/dev/null
