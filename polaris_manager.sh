@@ -1044,6 +1044,9 @@ install_python_requirements() {
         # Get the path to Python 3.10 from Homebrew
         python310_path=$(brew --prefix python@3.10)/bin/python3
         
+        # Export the variable to make it available in all functions
+        export python310_path
+        
         # Confirm Python 3.10 is available (but don't make it system default)
         if [ ! -f "$python310_path" ]; then
             print_error "Could not find Python 3.10 at expected location: $python310_path"
@@ -1320,7 +1323,28 @@ install_polaris() {
             if is_macos; then
                 # On MacOS, explicitly use Python 3.10 for the virtual environment
                 print_status "Using Python 3.10 specifically for the virtual environment..."
-                "$python310_path" -m venv venv
+                
+                # Check if python310_path is set, if not try to set it again
+                if [ -z "$python310_path" ]; then
+                    print_warning "Python 3.10 path not set. Attempting to locate it..."
+                    if brew list python@3.10 &>/dev/null; then
+                        python310_path=$(brew --prefix python@3.10)/bin/python3
+                        export python310_path
+                        print_status "Found Python 3.10 at: $python310_path"
+                    else
+                        print_warning "Python 3.10 not installed via Homebrew"
+                    fi
+                fi
+                
+                print_status "Python 3.10 path: $python310_path"
+                if [ -f "$python310_path" ]; then
+                    print_status "Python 3.10 exists at this path"
+                    "$python310_path" -m venv venv
+                else
+                    print_error "Python 3.10 not found at: $python310_path"
+                    print_status "Falling back to system Python..."
+                    python3 -m venv venv
+                fi
             else
                 # On other systems, use the default Python
                 python3 -m venv venv
@@ -1683,7 +1707,28 @@ EOF
     if is_macos; then
         # On MacOS, explicitly use Python 3.10 for the virtual environment
         print_status "Using Python 3.10 specifically for the virtual environment..."
-        "$python310_path" -m venv venv
+        
+        # Check if python310_path is set, if not try to set it again
+        if [ -z "$python310_path" ]; then
+            print_warning "Python 3.10 path not set. Attempting to locate it..."
+            if brew list python@3.10 &>/dev/null; then
+                python310_path=$(brew --prefix python@3.10)/bin/python3
+                export python310_path
+                print_status "Found Python 3.10 at: $python310_path"
+            else
+                print_warning "Python 3.10 not installed via Homebrew"
+            fi
+        fi
+        
+        print_status "Python 3.10 path: $python310_path"
+        if [ -f "$python310_path" ]; then
+            print_status "Python 3.10 exists at this path"
+            "$python310_path" -m venv venv
+        else
+            print_error "Python 3.10 not found at: $python310_path"
+            print_status "Falling back to system Python..."
+            python3 -m venv venv
+        fi
     else
         # On other systems, use the default Python
         python3 -m venv venv
@@ -2148,12 +2193,31 @@ ask_to_start_polaris() {
             print_warning "Creating a new virtual environment..."
             
             # Try to create a new virtual environment
-            if is_macos && [ -n "$python310_path" ] && [ -f "$python310_path" ]; then
-                # On MacOS, use Python 3.10 if available
-                print_status "Using Python 3.10 for virtual environment..."
-                "$python310_path" -m venv venv
+            if is_macos; then
+                # On MacOS, try to use Python 3.10
+                print_status "Attempting to use Python 3.10 for virtual environment..."
+                
+                # Check if python310_path is set, if not try to set it again
+                if [ -z "$python310_path" ]; then
+                    print_warning "Python 3.10 path not set. Attempting to locate it..."
+                    if brew list python@3.10 &>/dev/null; then
+                        python310_path=$(brew --prefix python@3.10)/bin/python3
+                        export python310_path
+                        print_status "Found Python 3.10 at: $python310_path"
+                    else
+                        print_warning "Python 3.10 not installed via Homebrew"
+                    fi
+                fi
+                
+                if [ -n "$python310_path" ] && [ -f "$python310_path" ]; then
+                    print_status "Using Python 3.10 at: $python310_path"
+                    "$python310_path" -m venv venv
+                else
+                    print_warning "Python 3.10 not found. Using system Python instead."
+                    python3 -m venv venv
+                fi
             else
-                # Otherwise use the default Python
+                # Non-macOS systems use default Python
                 python3 -m venv venv
             fi
             if [ ! -f "venv/bin/activate" ]; then
