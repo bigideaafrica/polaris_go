@@ -331,18 +331,23 @@ Subsystem sftp /usr/lib/openssh/sftp-server
                         if not group_name:
                             group_name = 'staff'  # Default to 'staff' if we can't get the group
                         
-                        subprocess.run(['sudo', 'chown', '-R', f'{username}:{group_name}', str(ssh_dir)], check=True)
+                        # Only change ownership if current user owns the directory
+                        if str(Path.home()) == str(ssh_dir.parent):
+                            self.logger.info(f"Setting ownership of SSH directory to {username}:{group_name}")
+                            subprocess.run(['sudo', 'chown', '-R', f'{username}:{group_name}', str(ssh_dir)], check=True)
+                        else:
+                            self.logger.warning(f"Skipping ownership change for SSH directory not in home directory")
                     except Exception as e:
-                        self.logger.warning(f"Failed to set ownership with primary group: {e}. Trying with 'staff' group.")
-                        subprocess.run(['sudo', 'chown', '-R', f'{username}:staff', str(ssh_dir)], check=True)
+                        self.logger.warning(f"Failed to set ownership with primary group: {e}. Skipping ownership change.")
                 else:
                     # On Linux
-                    subprocess.run(['sudo', 'chown', '-R', f'{username}:{username}', str(ssh_dir)], check=True)
-                cmd = ['chown', '-R', f'{username}:{username}', str(ssh_dir)]
-                if not self.is_root:
-                    cmd.insert(0, 'sudo')
-                subprocess.run(cmd, check=True)
-            
+                    # Only change ownership if current user owns the directory
+                    if str(Path.home()) == str(ssh_dir.parent):
+                        self.logger.info(f"Setting ownership of SSH directory to {username}:{username}")
+                        subprocess.run(['sudo', 'chown', '-R', f'{username}:{username}', str(ssh_dir)], check=True)
+                    else:
+                        self.logger.warning(f"Skipping ownership change for SSH directory not in home directory")
+                
             self.logger.info("User configured successfully")
             return username, password
             
